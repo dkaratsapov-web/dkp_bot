@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Оформление ДКП</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://widget.cloudpayments.ru/bundles/cloudpayments.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.7/dist/pizzip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.50.0/build/docxtemplater.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/pdfmake.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js"></script>
+<style>
+  :root { --bg: var(--tg-theme-bg-color, #fff); --fg: var(--tg-theme-text-color, #111);
+          --hint: var(--tg-theme-hint-color, #888); --btn: var(--tg-theme-button-color, #2ea6ff);
+          --btn-fg: var(--tg-theme-button-text-color, #fff);
+          --sec: var(--tg-theme-secondary-bg-color, #f2f3f5); }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg);
+         color: var(--fg); padding: 12px 12px 96px; }
+  h2 { font-size: 17px; margin: 22px 0 8px; }
+  h2:first-child { margin-top: 4px; }
+  .card { background: var(--sec); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  label { display: block; font-size: 13px; color: var(--hint); margin: 8px 0 3px; }
+  input, select { width: 100%; padding: 9px 10px; font-size: 15px; border: 1px solid #0001;
+          border-radius: 9px; background: var(--bg); color: var(--fg); }
+  .row { display: flex; gap: 8px; } .row > div { flex: 1; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+  .seg button { flex: 1; min-width: 70px; padding: 8px; border: 1px solid #0002; border-radius: 9px;
+          background: var(--bg); color: var(--fg); font-size: 13px; cursor: pointer; }
+  .seg button.on { background: var(--btn); color: var(--btn-fg); border-color: var(--btn); }
+  .gsel { align-items: center; gap: 6px; margin: 2px 0 6px; }
+  .gsel button { padding: 3px 12px; font-size: 12px; border: 1px solid #0002; border-radius: 20px;
+          background: var(--bg); color: var(--hint); cursor: pointer; }
+  .gsel button.on { background: var(--btn); color: var(--btn-fg); border-color: var(--btn); }
+  .gsel .ghint { font-size: 11px; color: var(--hint); margin-left: 2px; }
+  .file { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .file input[type=file] { display: none; }
+  .btn { display: inline-block; padding: 9px 12px; border-radius: 9px; border: none;
+          background: var(--btn); color: var(--btn-fg); font-size: 14px; cursor: pointer; }
+  .btn.sec { background: var(--bg); color: var(--btn); border: 1px solid var(--btn); }
+  .submit { position: fixed; left: 12px; right: 12px; bottom: 12px; padding: 14px;
+          font-size: 16px; border-radius: 12px; border: none; background: var(--btn);
+          color: var(--btn-fg); }
+  .hint { font-size: 12px; color: var(--hint); margin: 4px 0; }
+  .badge { font-size: 11px; color: var(--hint); }
+  .org-only, .person-only { display: none; }
+</style>
+</head>
+<body>
+<h2>Договор купли-продажи ТС</h2>
+<p class="hint">Выберите тип каждой стороны, загрузите фото (распознается автоматически)
+   или заполните поля вручную, проверьте — и нажмите «Сформировать договор».</p>
+
+<div id="parties"></div>
+
+<h2>Автомобиль</h2>
+<div class="card">
+  <div class="file">
+    <button class="btn sec" onclick="document.getElementById('sts-file').click()">📷 СТС — лицевая</button>
+    <span id="sts-status" class="badge"></span>
+    <input type="file" id="sts-file" accept="image/*" />
+  </div>
+  <div class="file">
+    <button class="btn sec" onclick="document.getElementById('stsb-file').click()">📷 СТС — оборот</button>
+    <span id="stsb-status" class="badge"></span>
+    <input type="file" id="stsb-file" accept="image/*" />
+  </div>
+  <div class="file">
+    <button class="btn sec" onclick="document.getElementById('pts-file').click()">📷 Фото ПТС</button>
+    <span id="pts-status" class="badge">либо впишите серию, номер и дату самостоятельно</span>
+    <input type="file" id="pts-file" accept="image/*" />
+  </div>
+  <div class="hint" style="text-align:center">либо заполните вручную ниже</div>
+  <div id="car-fields"></div>
+</div>
+
+<h2>Сделка</h2>
+<div class="card">
+  <div class="row">
+    <div><label>Город</label><input id="city" placeholder="Тверь" /></div>
+    <div><label>Дата</label><input id="dealdate" type="date" /></div>
+  </div>
+  <label>Цена, ₽ (цифрами)</label>
+  <input id="price_num" inputmode="numeric" placeholder="1850000" oninput="updatePriceWords()" />
+  <label>Прописью (можно поправить)</label>
+  <input id="price_words" placeholder="Один миллион восемьсот пятьдесят тысяч" />
+</div>
+
+<button class="submit" id="go" onclick="generate()">Сформировать договор</button>
+
+<div id="preview" style="display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column">
+  <div style="padding:10px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #0002">
+    <b style="flex:1;font-size:15px">Предпросмотр договора</b>
+  </div>
+  <div id="previewBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea;padding:12px"></div>
+  <div style="padding:10px 12px;display:flex;gap:8px;border-top:1px solid #0002">
+    <button class="btn sec" style="flex:1" onclick="closePreview()">✏️ Изменить</button>
+    <button class="btn" style="flex:2" id="sendBtn" onclick="sendGenerated()">✅ Отправить в чат</button>
+  </div>
+</div>
+
+<script>
+const tg = window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+// Адрес задеплоенного воркера ДКП-бота:
+const WORKER = "https://dkp-bot.d-karatsapov.workers.dev";
+
+/* ---------- Подписка (CloudPayments) ---------- */
+let subCfg = { subEnabled: false, cpPublicId: "", price: 0, days: 30 };
+let subIsActive = true;
+async function loadSub() {
+  try {
+    subCfg = await (await fetch(WORKER + "/api/config")).json();
+    if (!subCfg.subEnabled) { subIsActive = true; return; }
+    const s = await (await fetch(WORKER + "/api/sub-status", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData: tg?.initData || "" }),
+    })).json();
+    subIsActive = !!s.active;
+  } catch { subIsActive = true; }
+}
+loadSub();
+function payAndSubscribe() {
+  if (!subCfg.cpPublicId || !window.cp) { tg?.showAlert?.("Оплата временно недоступна."); return; }
+  const uid = String(tg?.initDataUnsafe?.user?.id || "");
+  const widget = new cp.CloudPayments();
+  widget.pay("charge", {
+    publicId: subCfg.cpPublicId,
+    description: `Подписка ДКП-бот, ${subCfg.days} дн.`,
+    amount: subCfg.price, currency: "RUB",
+    accountId: uid, invoiceId: "dkp-" + uid + "-" + Date.now(),
+    skin: "mini",
+  }, {
+    onSuccess: async () => {
+      tg?.showAlert?.("Оплата прошла, активируем доступ…");
+      for (let i = 0; i < 12 && !subIsActive; i++) { await new Promise((r) => setTimeout(r, 1500)); await loadSub(); }
+      tg?.showAlert?.(subIsActive ? "Подписка активна! Можно формировать договор." : "Оплата получена. Доступ появится в течение минуты.");
+    },
+    onFail: (reason) => { tg?.showAlert?.("Оплата не завершена: " + (reason || "")); },
+  });
+}
+
+/* ---------- описание полей ---------- */
+const PASSPORT_FIELDS = [
+  ["fio", "ФИО"], ["birth", "Дата рождения"], ["birthplace", "Место рождения"],
+  ["pasp_series", "Серия паспорта"], ["pasp_number", "Номер паспорта"],
+  ["pasp_issued_by", "Кем выдан"], ["pasp_issued_date", "Дата выдачи"],
+  ["pasp_code", "Код подразделения"], ["address", "Адрес регистрации"],
+];
+const ORG_FIELDS = [
+  ["org_name", "Наименование (ООО «…» / ИП …)"], ["ogrn", "ОГРН / ОГРНИП"],
+  ["inn", "ИНН"], ["kpp", "КПП"], ["signer_role", "В лице (директора…)"],
+  ["signer_fio", "ФИО подписанта"], ["basis", "Действует на основании"],
+  ["address", "Юридический адрес"],
+];
+const CAR_FIELDS = [
+  ["car_brand", "Марка, модель"], ["car_vin", "VIN"], ["car_type", "Тип ТС"],
+  ["car_category", "Категория"], ["car_year", "Год выпуска"], ["car_engine", "Двигатель №"],
+  ["car_chassis", "Шасси (рама) №"], ["car_body", "Кузов №"], ["car_color", "Цвет"],
+  ["car_power", "Мощность, л.с."], ["car_volume", "Объём, куб.см"], ["car_plate", "Госномер"],
+  ["pts_series", "Серия ПТС"], ["pts_number", "Номер ПТС"], ["pts_issued", "ПТС выдан"],
+  ["sts_series", "Серия СТС"], ["sts_number", "Номер СТС"],
+];
+
+function inp(id, label, val = "") {
+  return `<label>${label}</label><input id="${id}" value="${val.replace(/"/g, "&quot;")}" />`;
+}
+
+/* ---------- стороны (Продавец / Покупатель) ---------- */
+const TYPES = [["person","Физлицо"],["org","Юрлицо"],["ip","ИП"]];
+function partyBlock(pre, title) {
+  const seg = TYPES.map(([k, l]) =>
+    `<button data-t="${k}" onclick="setType('${pre}','${k}')">${l}</button>`).join("");
+  return `<h2>${title}</h2>
+  <div class="card">
+    <div class="seg" id="${pre}-seg">${seg}</div>
+    <div class="gsel gender-only" id="${pre}-gseg" style="display:none">
+      <button data-g="m" onclick="setGender('${pre}','m')">муж.</button>
+      <button data-g="f" onclick="setGender('${pre}','f')">жен.</button>
+      <span class="ghint">если заполняете вручную</span>
+    </div>
+    <div class="file person-only" id="${pre}-pfile-wrap">
+      <button class="btn sec" onclick="document.getElementById('${pre}-pfile').click()">📷 Фото паспорта</button>
+      <span id="${pre}-status" class="badge">либо заполните вручную ниже</span>
+      <input type="file" id="${pre}-pfile" accept="image/*" />
+    </div>
+    <div class="file person-only" id="${pre}-rfile-wrap">
+      <button class="btn sec" onclick="document.getElementById('${pre}-rfile').click()">📷 Фото прописки (адрес)</button>
+      <span id="${pre}-rstatus" class="badge">либо впишите адрес вручную ниже</span>
+      <input type="file" id="${pre}-rfile" accept="image/*" />
+    </div>
+    <div class="person-only" id="${pre}-person"></div>
+    <div class="file org-only" id="${pre}-ofile-wrap">
+      <button class="btn sec" onclick="document.getElementById('${pre}-ofile').click()">📷 Скан карточки организации</button>
+      <span id="${pre}-ostatus" class="badge">либо заполните вручную ниже</span>
+      <input type="file" id="${pre}-ofile" accept="image/*" />
+    </div>
+    <div class="org-only" id="${pre}-org"></div>
+  </div>`;
+}
+document.getElementById("parties").innerHTML =
+  partyBlock("seller", "Продавец") + partyBlock("buyer", "Покупатель");
+
+// заполняем поля
+function fillFields(containerId, fields, prefix) {
+  document.getElementById(containerId).innerHTML =
+    fields.map(([id, l]) => inp(`${prefix}${id}`, l)).join("");
+}
+["seller", "buyer"].forEach((pre) => {
+  fillFields(`${pre}-person`, PASSPORT_FIELDS, `${pre}_`);
+  fillFields(`${pre}-org`, ORG_FIELDS, `${pre}_`);
+});
+fillFields("car-fields", CAR_FIELDS, "");
+
+const partyType = { seller: "person", buyer: "person" };
+const partyGender = { seller: "m", buyer: "m" };
+function setType(pre, t) {
+  partyType[pre] = t;
+  document.querySelectorAll(`#${pre}-seg button`).forEach((b) =>
+    b.classList.toggle("on", b.dataset.t === t));
+  const isOrg = t === "org" || t === "ip";
+  document.getElementById(`${pre}-org`).style.display = isOrg ? "block" : "none";
+  document.getElementById(`${pre}-person`).style.display = isOrg ? "none" : "block";
+  document.getElementById(`${pre}-pfile-wrap`).style.display = isOrg ? "none" : "flex";
+  document.getElementById(`${pre}-rfile-wrap`).style.display = isOrg ? "none" : "flex";
+  document.getElementById(`${pre}-ofile-wrap`).style.display = isOrg ? "flex" : "none";
+  // Пол нужен для физлица и ИП («именуемый/ая»); для юрлица — нет.
+  document.getElementById(`${pre}-gseg`).style.display = t === "org" ? "none" : "flex";
+}
+function setGender(pre, g) {
+  partyGender[pre] = g;
+  document.querySelectorAll(`#${pre}-gseg button`).forEach((b) =>
+    b.classList.toggle("on", b.dataset.g === g));
+}
+// Определение пола по отчеству (надёжный признак в русском).
+function detectGender(fio) {
+  const patr = (fio.trim().split(/\s+/)[2] || "").toLowerCase();
+  if (/(вна|чна)$/.test(patr)) return "f";
+  if (/(вич|ьич|ыч|ич)$/.test(patr)) return "m";
+  return null;
+}
+["seller", "buyer"].forEach((pre) => {
+  setType(pre, "person"); setGender(pre, "m");
+  const fioEl = document.getElementById(`${pre}_fio`);
+  if (fioEl) fioEl.addEventListener("input", () => {
+    const g = detectGender(fioEl.value); if (g) setGender(pre, g);
+  });
+});
+
+/* ---------- загрузка и распознавание фото ---------- */
+function fileToDataUrl(file) {
+  return new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
+}
+async function recognize(file, kind, statusEl, applyPrefix) {
+  statusEl.textContent = "распознаю…";
+  try {
+    const image = await fileToDataUrl(file);
+    const r = await fetch(WORKER + "/api/recognize", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData: tg?.initData || "", image, kind }),
+    });
+    const data = await r.json();
+    if (data.error) {
+      statusEl.textContent = data.error === "no_api_key"
+        ? "авто-распознавание выключено — заполните вручную"
+        : `ошибка: ${data.error}${data.status ? " " + data.status : ""}${data.detail ? " — " + data.detail : ""}`;
+      return;
+    }
+    let n = 0;
+    for (const [k, v] of Object.entries(data.fields || {})) {
+      const el = document.getElementById(applyPrefix + k);
+      if (el && v) { el.value = v; n++; }
+    }
+    // Пол: из поля gender Яндекса, иначе по отчеству.
+    const pre = applyPrefix.replace(/_$/, "");
+    if (pre === "seller" || pre === "buyer") {
+      const fioEl = document.getElementById(`${pre}_fio`);
+      const g = data._gender || (fioEl && detectGender(fioEl.value));
+      if (g) setGender(pre, g);
+    }
+    statusEl.textContent = `распознано полей: ${n} — проверьте`;
+  } catch (e) { statusEl.textContent = "ошибка распознавания — вручную"; }
+}
+["seller", "buyer"].forEach((pre) => {
+  document.getElementById(`${pre}-pfile`).addEventListener("change", (e) => {
+    if (e.target.files[0]) recognize(e.target.files[0], "passport",
+      document.getElementById(`${pre}-status`), `${pre}_`);
+  });
+  document.getElementById(`${pre}-rfile`).addEventListener("change", (e) => {
+    if (e.target.files[0]) recognize(e.target.files[0], "reg",
+      document.getElementById(`${pre}-rstatus`), `${pre}_`);
+  });
+  document.getElementById(`${pre}-ofile`).addEventListener("change", (e) => {
+    if (e.target.files[0]) recognize(e.target.files[0], "org_card",
+      document.getElementById(`${pre}-ostatus`), `${pre}_`);
+  });
+});
+document.getElementById("sts-file").addEventListener("change", (e) => {
+  if (e.target.files[0]) recognize(e.target.files[0], "sts",
+    document.getElementById("sts-status"), "");
+});
+document.getElementById("stsb-file").addEventListener("change", (e) => {
+  if (e.target.files[0]) recognize(e.target.files[0], "sts_back",
+    document.getElementById("stsb-status"), "");
+});
+document.getElementById("pts-file").addEventListener("change", (e) => {
+  if (e.target.files[0]) recognize(e.target.files[0], "pts",
+    document.getElementById("pts-status"), "");
+});
+
+/* ---------- цена прописью ---------- */
+function numToWords(n) {
+  n = parseInt(String(n).replace(/\D/g, ""), 10); if (!n) return "";
+  const ones = ["","один","два","три","четыре","пять","шесть","семь","восемь","девять"];
+  const onesF = ["","одна","две","три","четыре","пять","шесть","семь","восемь","девять"];
+  const teens = ["десять","одиннадцать","двенадцать","тринадцать","четырнадцать","пятнадцать","шестнадцать","семнадцать","восемнадцать","девятнадцать"];
+  const tens = ["","","двадцать","тридцать","сорок","пятьдесят","шестьдесят","семьдесят","восемьдесят","девяносто"];
+  const huns = ["","сто","двести","триста","четыреста","пятьсот","шестьсот","семьсот","восемьсот","девятьсот"];
+  function triad(num, fem) {
+    let s = []; const h = Math.floor(num / 100), t = Math.floor((num % 100) / 10), o = num % 10;
+    if (h) s.push(huns[h]);
+    if (t === 1) s.push(teens[o]); else { if (t) s.push(tens[t]); if (o) s.push((fem ? onesF : ones)[o]); }
+    return s.join(" ");
+  }
+  const mil = Math.floor(n / 1e6), th = Math.floor((n % 1e6) / 1000), r = n % 1000;
+  let out = [];
+  if (mil) out.push(triad(mil) + " " + plural(mil, "миллион","миллиона","миллионов"));
+  if (th) out.push(triad(th, true) + " " + plural(th, "тысяча","тысячи","тысяч"));
+  if (r) out.push(triad(r));
+  let s = out.join(" ").trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function plural(n, a, b, c) {
+  n = Math.abs(n) % 100; const n1 = n % 10;
+  if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c;
+}
+function updatePriceWords() {
+  document.getElementById("price_words").value = numToWords(document.getElementById("price_num").value);
+}
+
+/* ---------- сбор данных под шаблон ---------- */
+function val(id) { const e = document.getElementById(id); return e ? e.value.trim() : ""; }
+function shortFio(fio) {
+  const p = fio.trim().split(/\s+/);
+  return p.length >= 2 ? `${p[0]} ${p[1][0]}.${p[2] ? p[2][0] + "." : ""}` : fio;
+}
+function partyData(pre) {
+  const t = partyType[pre], isOrg = t === "org" || t === "ip";
+  // Юрлицо → «именуемое»; физлицо/ИП → по полу: жен. «ая», муж. «ый».
+  const end = t === "org" ? "ое" : partyGender[pre] === "f" ? "ая" : "ый";
+  const d = { [`${pre}_org`]: isOrg, [`${pre}_end`]: end, [`${pre}_address`]: val(`${pre}_address`) };
+  if (isOrg) {
+    for (const [k] of ORG_FIELDS) d[`${pre}_${k}`] = val(`${pre}_${k}`);
+    d[`${pre}_short`] = shortFio(val(`${pre}_signer_fio`)) || val(`${pre}_org_name`);
+  } else {
+    for (const [k] of PASSPORT_FIELDS) d[`${pre}_${k}`] = val(`${pre}_${k}`);
+    d[`${pre}_short`] = shortFio(val(`${pre}_fio`));
+  }
+  return d;
+}
+function collect() {
+  const dt = val("dealdate") ? new Date(val("dealdate")) : new Date();
+  const months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+  const data = {
+    city: val("city"), day: String(dt.getDate()).padStart(2, "0"),
+    month: months[dt.getMonth()], year: dt.getFullYear(),
+    price_num: Number(val("price_num").replace(/\D/g, "")).toLocaleString("ru-RU"),
+    price_words: val("price_words"),
+    ...partyData("seller"), ...partyData("buyer"),
+  };
+  for (const [k] of CAR_FIELDS) data[k] = val(k);
+  return data;
+}
+
+/* ---------- генерация DOCX + PDF ---------- */
+async function loadTemplate() {
+  const res = await fetch("dkp-template.docx", { cache: "no-store" });
+  if (!res.ok) throw new Error("шаблон не найден (" + res.status + ")");
+  return await res.arrayBuffer();
+}
+function bufToB64(buf) {
+  let bin = ""; const b = new Uint8Array(buf);
+  for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
+  return btoa(bin);
+}
+async function makeDocx(data) {
+  const Pz = window.PizZip;
+  const DT = window.docxtemplater || window.Docxtemplater || window.DocxTemplater;
+  if (!Pz || !DT) throw new Error("Библиотеки документа не загрузились — проверьте интернет и откройте мини-апп заново.");
+  const content = await loadTemplate();
+  const zip = new Pz(content);
+  const doc = new DT(zip, { paragraphLoop: true, linebreaks: true });
+  doc.render(data);
+  return doc.getZip().generate({ type: "arraybuffer" });
+}
+
+// Описание стороны одной строкой (для договора).
+function partyLine(d, pre, role) {
+  return d[`${pre}_org`]
+    ? `${d[pre+"_org_name"]}, ОГРН ${d[pre+"_ogrn"]}, ИНН ${d[pre+"_inn"]}, адрес: ${d[pre+"_address"]}, в лице ${d[pre+"_signer_role"]} ${d[pre+"_signer_fio"]}, действующего на основании ${d[pre+"_basis"]}, именуем${d[pre+"_end"]} «${role}»`
+    : `${d[pre+"_fio"]}, ${d[pre+"_birth"]} г.р., паспорт ${d[pre+"_pasp_series"]} № ${d[pre+"_pasp_number"]}, выдан ${d[pre+"_pasp_issued_by"]} ${d[pre+"_pasp_issued_date"]}, код ${d[pre+"_pasp_code"]}, адрес: ${d[pre+"_address"]}, именуем${d[pre+"_end"]} «${role}»`;
+}
+// Спецификация ТС (общая для PDF и предпросмотра).
+function carSpec(data) {
+  return [
+    ["Марка, модель", data.car_brand], ["VIN", data.car_vin], ["Тип ТС", data.car_type],
+    ["Категория", data.car_category], ["Год выпуска", data.car_year], ["Двигатель №", data.car_engine],
+    ["Шасси (рама) №", data.car_chassis], ["Кузов №", data.car_body], ["Цвет", data.car_color],
+    ["Мощность, л.с.", data.car_power],
+    ["Объём, куб.см", data.car_volume], ["Госномер", data.car_plate],
+    ["ПТС", `серия ${data.pts_series} № ${data.pts_number}` + (data.pts_issued ? `, выдан ${data.pts_issued}` : "")],
+    ["СТС", `серия ${data.sts_series} № ${data.sts_number}`],
+  ];
+}
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+// Адаптивный HTML-предпросмотр договора (для мобильных).
+function contractHtml(data) {
+  const rows = carSpec(data).map(([k, v]) =>
+    `<tr><td style="font-weight:600;padding:4px 8px;border-bottom:1px solid #ddd;width:42%;vertical-align:top">${esc(k)}</td><td style="padding:4px 8px;border-bottom:1px solid #ddd;word-break:break-word">${esc(v || "—")}</td></tr>`).join("");
+  return `<div style="max-width:720px;margin:0 auto;background:#fff;color:#111;padding:20px 18px;border-radius:6px;font-size:14px;line-height:1.45;box-shadow:0 1px 6px #0003">
+    <div style="text-align:center;font-weight:700;font-size:16px;margin-bottom:10px">ДОГОВОР КУПЛИ-ПРОДАЖИ ТРАНСПОРТНОГО СРЕДСТВА</div>
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:10px"><span>г. ${esc(data.city)}</span><span>«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.</span></div>
+    <p style="text-align:justify;margin:6px 0">${esc(partyLine(data, "seller", "Продавец"))}, с одной стороны, и</p>
+    <p style="text-align:justify;margin:6px 0">${esc(partyLine(data, "buyer", "Покупатель"))}, с другой стороны,</p>
+    <p style="margin:6px 0">вместе именуемые «Стороны», заключили настоящий договор о нижеследующем:</p>
+    <p style="font-weight:700;margin:12px 0 4px">1. ПРЕДМЕТ ДОГОВОРА</p>
+    <p style="margin:4px 0">1.1. Продавец передаёт в собственность Покупателя, а Покупатель принимает и оплачивает транспортное средство:</p>
+    <table style="width:100%;border-collapse:collapse;margin:6px 0">${rows}</table>
+    <p style="margin:4px 0">1.2. Продавец гарантирует, что ТС не продано, не заложено, в споре и под арестом не состоит.</p>
+    <p style="font-weight:700;margin:12px 0 4px">2. ЦЕНА И ПОРЯДОК РАСЧЁТОВ</p>
+    <p style="margin:2px 0">2.1. Стоимость ТС составляет ${esc(data.price_num)} (${esc(data.price_words)}) рублей.</p>
+    <p style="margin:2px 0">2.2. Расчёт произведён полностью в момент подписания договора.</p>
+    <p style="font-weight:700;margin:12px 0 4px">3. ПЕРЕДАЧА ТС</p>
+    <p style="margin:2px 0">3.1. Продавец передал, а Покупатель принял ТС, документы (ПТС, СТС) и ключи. Договор имеет силу акта приёма-передачи.</p>
+    <p style="margin:2px 0">3.2. Право собственности переходит к Покупателю с момента подписания договора.</p>
+    <p style="font-weight:700;margin:12px 0 6px">4. ПОДПИСИ СТОРОН</p>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px"><div style="flex:1;min-width:140px">ПРОДАВЕЦ:<br>${esc(data.seller_short)}<br><br>М.П. _________</div><div style="flex:1;min-width:140px">ПОКУПАТЕЛЬ:<br>${esc(data.buyer_short)}<br><br>М.П. _________</div></div>
+    <p style="margin:2px 0">Деньги в сумме ${esc(data.price_num)} руб. получил, ТС передал: _________ / ${esc(data.seller_short)}</p>
+    <p style="margin:2px 0">ТС и документы получил, претензий не имею: _________ / ${esc(data.buyer_short)}</p>
+  </div>`;
+}
+
+function makePdf(data) {
+  const spec = carSpec(data);
+  const dd = {
+    pageSize: "A4", pageMargins: [50, 40, 40, 40],
+    defaultStyle: { font: "Roboto", fontSize: 10 },
+    content: [
+      { text: "ДОГОВОР КУПЛИ-ПРОДАЖИ ТРАНСПОРТНОГО СРЕДСТВА", bold: true, fontSize: 13, alignment: "center", margin: [0, 0, 0, 6] },
+      { columns: [{ text: "г. " + data.city }, { text: `«${data.day}» ${data.month} ${data.year} г.`, alignment: "right" }], margin: [0, 0, 0, 8] },
+      { text: partyLine(data, "seller", "Продавец") + ", с одной стороны, и", margin: [0, 0, 0, 4], alignment: "justify" },
+      { text: partyLine(data, "buyer", "Покупатель") + ", с другой стороны,", margin: [0, 0, 0, 4], alignment: "justify" },
+      { text: "вместе именуемые «Стороны», заключили настоящий договор о нижеследующем:", margin: [0, 0, 0, 8] },
+      { text: "1. ПРЕДМЕТ ДОГОВОРА", bold: true, margin: [0, 4, 0, 4] },
+      { text: "1.1. Продавец передаёт в собственность Покупателя, а Покупатель принимает и оплачивает транспортное средство:", margin: [0, 0, 0, 4] },
+      { table: { widths: [150, "*"], body: spec.map(([k, v]) => [{ text: k, bold: true }, v || "—"]) }, layout: "lightHorizontalLines", margin: [0, 0, 0, 6] },
+      { text: "1.2. Продавец гарантирует, что ТС не продано, не заложено, в споре и под арестом не состоит.", margin: [0, 0, 0, 6] },
+      { text: "2. ЦЕНА И ПОРЯДОК РАСЧЁТОВ", bold: true, margin: [0, 4, 0, 4] },
+      { text: `2.1. Стоимость ТС составляет ${data.price_num} (${data.price_words}) рублей.`, margin: [0, 0, 0, 2] },
+      { text: "2.2. Расчёт произведён полностью в момент подписания договора.", margin: [0, 0, 0, 6] },
+      { text: "3. ПЕРЕДАЧА ТС", bold: true, margin: [0, 4, 0, 4] },
+      { text: "3.1. Продавец передал, а Покупатель принял ТС, документы (ПТС, СТС) и ключи. Договор имеет силу акта приёма-передачи.", margin: [0, 0, 0, 2] },
+      { text: "3.2. Право собственности переходит к Покупателю с момента подписания договора.", margin: [0, 0, 0, 6] },
+      { text: "4. ПОДПИСИ СТОРОН", bold: true, margin: [0, 6, 0, 6] },
+      { columns: [
+        { text: `ПРОДАВЕЦ:\n${data.seller_short}\n\nМ.П. ___________` },
+        { text: `ПОКУПАТЕЛЬ:\n${data.buyer_short}\n\nМ.П. ___________` } ], margin: [0, 0, 0, 10] },
+      { text: `Деньги в сумме ${data.price_num} руб. получил, ТС передал: ___________ / ${data.seller_short}`, margin: [0, 0, 0, 2] },
+      { text: `ТС и документы получил, претензий не имею: ___________ / ${data.buyer_short}` },
+    ],
+  };
+  return new Promise((res) => pdfMake.createPdf(dd).getBuffer((buf) => res(buf)));
+}
+
+// Сформированные файлы хранятся до подтверждения отправки.
+let gen = { docx: null, pdf: null, name: "", url: "" };
+
+async function generate() {
+  const btn = document.getElementById("go");
+  btn.textContent = "Формирую…"; btn.disabled = true;
+  try {
+    const data = collect();
+    if (!data.city || !data.price_num) { tg?.showAlert?.("Заполните город и цену."); throw 0; }
+    // Предпросмотр — сразу из данных (адаптивный HTML), файлы готовим параллельно.
+    document.getElementById("previewBody").innerHTML = contractHtml(data);
+    document.getElementById("preview").style.display = "flex";
+    document.getElementById("previewBody").scrollTop = 0;
+    const [docxBuf, pdfBuf] = await Promise.all([makeDocx(data), makePdf(data)]);
+    gen.docx = docxBuf; gen.pdf = pdfBuf;
+    gen.name = `ДКП_${(data.car_brand || "авто").replace(/\s+/g, "_")}`;
+  } catch (e) { if (e !== 0) tg?.showAlert?.("Ошибка: " + (e.message || e)); }
+  finally { btn.textContent = "Сформировать договор"; btn.disabled = false; }
+}
+function closePreview() {
+  document.getElementById("preview").style.display = "none";
+}
+async function sendGenerated() {
+  // Платный режим: без активной подписки — предлагаем оплату вместо отправки.
+  if (subCfg.subEnabled && !subIsActive) {
+    await loadSub();
+    if (!subIsActive) {
+      tg?.showConfirm?.(`Для получения договора нужна подписка — ${subCfg.price} ₽ на ${subCfg.days} дней. Оплатить сейчас?`,
+        (ok) => { if (ok) payAndSubscribe(); });
+      return;
+    }
+  }
+  const sb = document.getElementById("sendBtn");
+  sb.textContent = "Отправляю…"; sb.disabled = true;
+  try {
+    const r = await fetch(WORKER + "/api/send", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        initData: tg?.initData || "", filename: gen.name,
+        docx_base64: bufToB64(gen.docx), pdf_base64: bufToB64(gen.pdf),
+      }),
+    });
+    if (r.status === 402) { await loadSub(); tg?.showConfirm?.(`Нужна подписка — ${subCfg.price} ₽ на ${subCfg.days} дней. Оплатить?`, (ok) => { if (ok) payAndSubscribe(); }); return; }
+    const out = await r.json();
+    if (out.ok) { closePreview(); tg?.showAlert?.("Готово! Договор отправлен в чат."); tg?.close?.(); }
+    else tg?.showAlert?.("Не удалось отправить: " + (out.error || "ошибка"));
+  } catch (e) { tg?.showAlert?.("Ошибка отправки: " + (e.message || e)); }
+  finally { sb.textContent = "✅ Отправить в чат"; sb.disabled = false; }
+}
+</script>
+</body>
+</html>

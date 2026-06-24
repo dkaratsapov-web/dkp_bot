@@ -1,0 +1,28 @@
+# Конфиг отдельного ДКП-бота (Cloudflare Worker).
+# В Workers Builds укажите Root directory = dkp-bot
+#
+# Секреты (НЕ здесь, только в дашборде → Variables and Secrets → Secret):
+#   TELEGRAM_BOT_TOKEN — токен бота (@BotFather)
+#   YANDEX_API_KEY     — ключ Яндекс (OCR + YandexGPT)
+#   CP_API_SECRET      — «Пароль для API» CloudPayments (проверка подписи webhook)
+
+name = "dkp-bot"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+# Адрес мини-аппа.
+MINI_APP_URL = "https://dkp-mini.pages.dev"
+# Folder ID Яндекс Облака (для OCR/GPT).
+YANDEX_FOLDER_ID = "b1gljk9huj8ot3pn8g1c"
+# --- Подписка (CloudPayments). Платный режим включается, когда задан CP_PUBLIC_ID и привязан KV ниже. ---
+CP_PUBLIC_ID = ""          # Public ID из ЛК CloudPayments (pk_...), публичный
+SUB_PRICE = "990"          # цена подписки за период, ₽
+SUB_DAYS = "30"            # срок подписки, дней
+
+# --- KV для хранения подписок (sub:<user_id> = срок окончания) ---
+# Создайте namespace: Cloudflare → Workers & Pages → KV → Create (напр. DKP_SUBS),
+# скопируйте его ID и раскомментируйте строки ниже, подставив id:
+# [[kv_namespaces]]
+# binding = "SUBS"
+# id = "ВАШ_KV_NAMESPACE_ID"
