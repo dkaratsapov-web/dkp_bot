@@ -15,12 +15,17 @@ compatibility_date = "2024-11-01"
 MINI_APP_URL = "https://dkp-mini.pages.dev"
 # Folder ID Яндекс Облака (для OCR/GPT).
 YANDEX_FOLDER_ID = "b1gljk9huj8ot3pn8g1c"
-# --- Подписка (CloudPayments). Платный режим включается, когда задан CP_PUBLIC_ID и привязан KV ниже. ---
-CP_PUBLIC_ID = ""          # Public ID из ЛК CloudPayments (pk_...), публичный
-SUB_PRICE = "990"          # цена подписки за период, ₽
-SUB_DAYS = "30"            # срок подписки, дней
+# --- Оплата (CloudPayments). Платный режим включается, когда задан CP_PUBLIC_ID и привязан KV ниже. ---
+# У бота ОТДЕЛЬНАЯ касса (своя, не общая с сайтом): свой Public ID + API Secret + свой Pay-вебхук.
+# Платежи дополнительно помечаются Data.cc="dkp" + InvoiceId "dkp-*" (страховка).
+CP_PUBLIC_ID = ""          # Public ID кассы бота (pk_...), публичный
+# Тарифы (₽). Можно не задавать — действуют значения по умолчанию из worker.js.
+PRICE_ONE = "99"           # один договор (разовый доступ)
+PRICE_1M  = "500"          # подписка 1 месяц
+PRICE_3M  = "1200"         # подписка 3 месяца
+PRICE_6M  = "2000"         # подписка полгода
 
-# --- KV для хранения подписок (sub:<user_id> = срок окончания) ---
+# --- KV для хранения доступа (sub:<user_id> = срок окончания, credits:<user_id> = остаток разовых) ---
 # Создайте namespace: Cloudflare → Workers & Pages → KV → Create (напр. DKP_SUBS),
 # скопируйте его ID и раскомментируйте строки ниже, подставив id:
 # [[kv_namespaces]]

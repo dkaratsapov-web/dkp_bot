@@ -12,14 +12,37 @@
 <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js"></script>
 <style>
   :root { --bg: var(--tg-theme-bg-color, #fff); --fg: var(--tg-theme-text-color, #111);
-          --hint: var(--tg-theme-hint-color, #888); --btn: var(--tg-theme-button-color, #2ea6ff);
-          --btn-fg: var(--tg-theme-button-text-color, #fff);
+          --hint: var(--tg-theme-hint-color, #888);
+          /* Цвета сайта (из логотипа): синий градиент + хром/зелёный акцент */
+          --brand: #1c4e9d; --brand2: #2f6fc0; --brand-light: #73c7d5; --accent: #22c55e;
+          --btn: #1c4e9d; --btn-fg: #fff;
           --sec: var(--tg-theme-secondary-bg-color, #f2f3f5); }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg);
          color: var(--fg); padding: 12px 12px 96px; }
   h2 { font-size: 17px; margin: 22px 0 8px; }
   h2:first-child { margin-top: 4px; }
+  /* Шапка с логотипом сайта */
+  .appbar { display: flex; align-items: center; gap: 12px; padding: 14px 14px; margin: -12px -12px 12px;
+            background: linear-gradient(135deg, var(--brand-light) 0%, var(--brand) 70%); color: #fff; }
+  .appbar img { width: 46px; height: 46px; flex: none; filter: drop-shadow(0 1px 2px #0003); }
+  .appbar .t1 { font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .appbar .t2 { font-size: 12px; opacity: .9; margin-top: 2px; }
+  /* Согласие на обработку ПДн */
+  .consent { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--hint);
+             background: var(--sec); border-radius: 10px; padding: 10px; margin: 0 0 12px; }
+  .consent input { width: 18px; height: 18px; flex: none; margin-top: 1px; accent-color: var(--brand); }
+  .consent a { color: var(--brand2); }
+  /* Тарифы (виды оплаты) */
+  .tariff { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer;
+            border: 1.5px solid #0001; border-radius: 12px; background: var(--bg); color: var(--fg);
+            padding: 12px 14px; margin-bottom: 10px; }
+  .tariff.one { border-color: var(--accent); background: linear-gradient(0deg,#22c55e10,#22c55e10), var(--bg); }
+  .tariff .ti { flex: 1; }
+  .tariff .t-title { font-size: 15px; font-weight: 600; }
+  .tariff .t-note { font-size: 12px; color: var(--hint); margin-top: 2px; }
+  .tariff .t-price { font-size: 16px; font-weight: 700; color: var(--brand); white-space: nowrap; }
+  .tariff.one .t-price { color: var(--accent); }
   .card { background: var(--sec); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
   label { display: block; font-size: 13px; color: var(--hint); margin: 8px 0 3px; }
   input, select { width: 100%; padding: 9px 10px; font-size: 15px; border: 1px solid #0001;
@@ -48,9 +71,22 @@
 </style>
 </head>
 <body>
-<h2>Договор купли-продажи ТС</h2>
+<div class="appbar">
+  <img src="logo.svg" alt="logo" />
+  <div>
+    <div class="t1">Договор купли-продажи ТС</div>
+    <div class="t2">фото паспорта и СТС → готовый договор</div>
+  </div>
+</div>
 <p class="hint">Выберите тип каждой стороны, загрузите фото (распознается автоматически)
    или заполните поля вручную, проверьте — и нажмите «Сформировать договор».</p>
+
+<label class="consent">
+  <input type="checkbox" id="consent" />
+  <span>Я даю согласие на обработку моих персональных данных (в т.ч. паспортных)
+        для формирования договора в соответствии с Федеральным законом № 152-ФЗ
+        «О персональных данных».</span>
+</label>
 
 <div id="parties"></div>
 
@@ -89,6 +125,19 @@
 
 <button class="submit" id="go" onclick="generate()">Сформировать договор</button>
 
+<div id="paywall" style="display:none;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
+  <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
+    <b style="flex:1;font-size:16px">Выберите доступ</b>
+    <button class="btn sec" onclick="closePaywall()">Закрыть</button>
+  </div>
+  <div style="flex:1;overflow:auto;padding:14px">
+    <p class="hint" id="paywall-status" style="margin:0 0 12px"></p>
+    <div id="tariffs"></div>
+    <p class="hint" style="margin-top:14px">Оплата проходит через защищённый виджет CloudPayments.
+       Доступ открывается автоматически после оплаты.</p>
+  </div>
+</div>
+
 <div id="preview" style="display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column">
   <div style="padding:10px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #0002">
     <b style="flex:1;font-size:15px">Предпросмотр договора</b>
@@ -105,9 +154,10 @@ const tg = window.Telegram?.WebApp; tg?.ready(); tg?.expand();
 // Адрес задеплоенного воркера ДКП-бота:
 const WORKER = "https://dkp-bot.d-karatsapov.workers.dev";
 
-/* ---------- Подписка (CloudPayments) ---------- */
-let subCfg = { subEnabled: false, cpPublicId: "", price: 0, days: 30 };
-let subIsActive = true;
+/* ---------- Доступ и оплата (CloudPayments) ---------- */
+let subCfg = { subEnabled: false, cpPublicId: "", tariffs: [] };
+let subIsActive = true;                       // есть доступ: подписка ИЛИ кредит
+let subInfo = { sub: false, credits: 0, until: 0 };
 async function loadSub() {
   try {
     subCfg = await (await fetch(WORKER + "/api/config")).json();
@@ -117,27 +167,64 @@ async function loadSub() {
       body: JSON.stringify({ initData: tg?.initData || "" }),
     })).json();
     subIsActive = !!s.active;
+    subInfo = { sub: !!s.sub, credits: s.credits || 0, until: s.until || 0 };
   } catch { subIsActive = true; }
 }
 loadSub();
-function payAndSubscribe() {
+
+// Разделы с видами оплат: рисуем карточки тарифов из конфига воркера.
+function renderTariffs() {
+  const box = document.getElementById("tariffs");
+  if (!box) return;
+  box.innerHTML = (subCfg.tariffs || []).map((t) =>
+    `<button class="tariff ${t.key === "one" ? "one" : ""}" onclick="payAndSubscribe('${t.key}')">
+       <span class="ti"><span class="t-title">${t.title}</span><span class="t-note">${t.note || ""}</span></span>
+       <span class="t-price">${t.price} ₽</span>
+     </button>`).join("");
+}
+function openPaywall() {
+  let st;
+  if (subInfo.sub && subInfo.until) st = "Подписка активна до " + new Date(subInfo.until).toLocaleDateString("ru-RU") + ".";
+  else if (subInfo.credits > 0) st = "Доступно договоров: " + subInfo.credits + ".";
+  else st = "Чтобы получить готовый договор, выберите вариант оплаты:";
+  document.getElementById("paywall-status").textContent = st;
+  renderTariffs();
+  document.getElementById("paywall").style.display = "flex";
+}
+function closePaywall() { document.getElementById("paywall").style.display = "none"; }
+
+function payAndSubscribe(planKey) {
+  const t = (subCfg.tariffs || []).find((x) => x.key === planKey);
+  if (!t) return;
   if (!subCfg.cpPublicId || !window.cp) { tg?.showAlert?.("Оплата временно недоступна."); return; }
   const uid = String(tg?.initDataUnsafe?.user?.id || "");
   const widget = new cp.CloudPayments();
   widget.pay("charge", {
     publicId: subCfg.cpPublicId,
-    description: `Подписка ДКП-бот, ${subCfg.days} дн.`,
-    amount: subCfg.price, currency: "RUB",
+    description: `ДКП-бот — ${t.title}`,
+    amount: t.price, currency: "RUB",
     accountId: uid, invoiceId: "dkp-" + uid + "-" + Date.now(),
+    data: { cc: "dkp", plan: t.key },     // метка платежа бота (касса общая с сайтом)
     skin: "mini",
   }, {
     onSuccess: async () => {
       tg?.showAlert?.("Оплата прошла, активируем доступ…");
       for (let i = 0; i < 12 && !subIsActive; i++) { await new Promise((r) => setTimeout(r, 1500)); await loadSub(); }
-      tg?.showAlert?.(subIsActive ? "Подписка активна! Можно формировать договор." : "Оплата получена. Доступ появится в течение минуты.");
+      closePaywall();
+      tg?.showAlert?.(subIsActive ? "Доступ открыт! Можно отправить договор." : "Оплата получена. Доступ появится в течение минуты.");
     },
     onFail: (reason) => { tg?.showAlert?.("Оплата не завершена: " + (reason || "")); },
   });
+}
+
+// Согласие на обработку ПДн обязательно перед загрузкой паспорта/прописки и формированием.
+function consentOk() {
+  const c = document.getElementById("consent");
+  if (c && !c.checked) {
+    tg?.showAlert?.("Поставьте галочку согласия на обработку персональных данных.");
+    return false;
+  }
+  return true;
 }
 
 /* ---------- описание полей ---------- */
@@ -145,7 +232,7 @@ const PASSPORT_FIELDS = [
   ["fio", "ФИО"], ["birth", "Дата рождения"], ["birthplace", "Место рождения"],
   ["pasp_series", "Серия паспорта"], ["pasp_number", "Номер паспорта"],
   ["pasp_issued_by", "Кем выдан"], ["pasp_issued_date", "Дата выдачи"],
-  ["pasp_code", "Код подразделения"], ["address", "Адрес регистрации"],
+  ["pasp_code", "Код подразделения"], ["address", "Адрес регистрации (прописка)"],
 ];
 const ORG_FIELDS = [
   ["org_name", "Наименование (ООО «…» / ИП …)"], ["ogrn", "ОГРН / ОГРНИП"],
@@ -283,10 +370,12 @@ async function recognize(file, kind, statusEl, applyPrefix) {
 }
 ["seller", "buyer"].forEach((pre) => {
   document.getElementById(`${pre}-pfile`).addEventListener("change", (e) => {
+    if (!consentOk()) { e.target.value = ""; return; }
     if (e.target.files[0]) recognize(e.target.files[0], "passport",
       document.getElementById(`${pre}-status`), `${pre}_`);
   });
   document.getElementById(`${pre}-rfile`).addEventListener("change", (e) => {
+    if (!consentOk()) { e.target.value = ""; return; }
     if (e.target.files[0]) recognize(e.target.files[0], "reg",
       document.getElementById(`${pre}-rstatus`), `${pre}_`);
   });
@@ -479,6 +568,7 @@ async function generate() {
   const btn = document.getElementById("go");
   btn.textContent = "Формирую…"; btn.disabled = true;
   try {
+    if (!consentOk()) throw 0;
     const data = collect();
     if (!data.city || !data.price_num) { tg?.showAlert?.("Заполните город и цену."); throw 0; }
     // Предпросмотр — сразу из данных (адаптивный HTML), файлы готовим параллельно.
@@ -495,14 +585,10 @@ function closePreview() {
   document.getElementById("preview").style.display = "none";
 }
 async function sendGenerated() {
-  // Платный режим: без активной подписки — предлагаем оплату вместо отправки.
+  // Платный режим: без активного доступа — показываем виды оплаты.
   if (subCfg.subEnabled && !subIsActive) {
     await loadSub();
-    if (!subIsActive) {
-      tg?.showConfirm?.(`Для получения договора нужна подписка — ${subCfg.price} ₽ на ${subCfg.days} дней. Оплатить сейчас?`,
-        (ok) => { if (ok) payAndSubscribe(); });
-      return;
-    }
+    if (!subIsActive) { openPaywall(); return; }
   }
   const sb = document.getElementById("sendBtn");
   sb.textContent = "Отправляю…"; sb.disabled = true;
@@ -514,7 +600,7 @@ async function sendGenerated() {
         docx_base64: bufToB64(gen.docx), pdf_base64: bufToB64(gen.pdf),
       }),
     });
-    if (r.status === 402) { await loadSub(); tg?.showConfirm?.(`Нужна подписка — ${subCfg.price} ₽ на ${subCfg.days} дней. Оплатить?`, (ok) => { if (ok) payAndSubscribe(); }); return; }
+    if (r.status === 402) { await loadSub(); openPaywall(); return; }
     const out = await r.json();
     if (out.ok) { closePreview(); tg?.showAlert?.("Готово! Договор отправлен в чат."); tg?.close?.(); }
     else tg?.showAlert?.("Не удалось отправить: " + (out.error || "ошибка"));

@@ -391,14 +391,52 @@ async function recognizeAnthropic(env, mediaType, data, kind) {
   }
 }
 
-/* ---------- Подписка (Cloudflare KV + CloudPayments) ---------- */
+/* ---------- Тарифы / доступ (Cloudflare KV + CloudPayments) ---------- */
 // Платный режим включён, только когда заданы KV-биндинг SUBS и Public ID CloudPayments.
 function subEnabled(env) { return !!(env.SUBS && env.CP_PUBLIC_ID); }
+function num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; }
+
+// Виды оплаты: разовый доступ (кредит на 1 договор) + подписки на срок.
+// Цены можно переопределить переменными воркера (PRICE_ONE/PRICE_1M/PRICE_3M/PRICE_6M).
+function tariffs(env) {
+  return [
+    { key: "one", title: "Один договор", note: "разовый доступ", price: num(env.PRICE_ONE, 99), credits: 1 },
+    { key: "m1", title: "1 месяц", note: "безлимит на 30 дней", price: num(env.PRICE_1M, 500), days: 30 },
+    { key: "m3", title: "3 месяца", note: "безлимит на 90 дней", price: num(env.PRICE_3M, 1200), days: 90 },
+    { key: "m6", title: "Полгода", note: "безлимит на 180 дней", price: num(env.PRICE_6M, 2000), days: 180 },
+  ];
+}
+// Тариф по ключу из платежа (Data.plan); запасной матч — по сумме.
+function findTariff(env, key, amount) {
+  const list = tariffs(env);
+  if (key) { const t = list.find((x) => x.key === key); if (t) return t; }
+  return list.find((x) => Math.abs(x.price - Number(amount || 0)) < 0.5) || null;
+}
+
 async function subUntil(env, userId) {
   if (!env.SUBS) return 0;
   return Number(await env.SUBS.get("sub:" + userId)) || 0;
 }
 async function subActive(env, userId) { return (await subUntil(env, userId)) > Date.now(); }
+
+// Кредиты разового доступа (1 кредит = 1 договор).
+async function credits(env, userId) {
+  if (!env.SUBS) return 0;
+  return Number(await env.SUBS.get("credits:" + userId)) || 0;
+}
+async function addCredits(env, userId, n) {
+  const next = (await credits(env, userId)) + (Number(n) || 1);
+  await env.SUBS.put("credits:" + userId, String(next));
+  return next;
+}
+// Списать один кредит. true — если был и списан.
+async function useCredit(env, userId) {
+  const cur = await credits(env, userId);
+  if (cur <= 0) return false;
+  await env.SUBS.put("credits:" + userId, String(cur - 1));
+  return true;
+}
+
 // Выдать/продлить подписку на N дней (продление — от текущего конца, если ещё активна).
 async function grantSub(env, userId, days) {
   const ms = (Number(days) || 30) * 86400000;
@@ -480,22 +518,24 @@ export default {
       return json(res, res.error ? 422 : 200);
     }
 
-    // Публичный конфиг для мини-аппа (Public ID, цена, срок, включён ли платный режим)
+    // Публичный конфиг для мини-аппа (Public ID, тарифы, включён ли платный режим)
     if (url.pathname === "/api/config") {
       return json({
         subEnabled: subEnabled(env), cpPublicId: env.CP_PUBLIC_ID || "",
-        price: Number(env.SUB_PRICE) || 0, days: Number(env.SUB_DAYS) || 30,
+        tariffs: tariffs(env),
       });
     }
 
-    // Статус подписки текущего пользователя
+    // Статус доступа текущего пользователя (подписка + остаток кредитов)
     if (url.pathname === "/api/sub-status" && request.method === "POST") {
       const b = await request.json().catch(() => ({}));
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       if (!subEnabled(env)) return json({ enabled: false, active: true });
       const until = await subUntil(env, auth.user.id);
-      return json({ enabled: true, active: until > Date.now(), until });
+      const cr = await credits(env, auth.user.id);
+      // active — есть ли доступ (подписка ИЛИ хотя бы один кредит).
+      return json({ enabled: true, active: until > Date.now() || cr > 0, sub: until > Date.now(), until, credits: cr });
     }
 
     // Уведомление CloudPayments об оплате (Pay). Доступ выдаётся ТОЛЬКО здесь.
@@ -507,13 +547,27 @@ export default {
       const status = p.get("Status");
       const amount = Number(p.get("Amount") || 0);
       const userId = p.get("AccountId");
-      const minPrice = Number(env.SUB_PRICE) || 0;
-      if (env.SUBS && userId && (status === "Completed" || status === "Authorized") && amount >= minPrice) {
-        await grantSub(env, userId, env.SUB_DAYS);
-        await tg(env, "sendMessage", {
-          chat_id: userId,
-          text: "✅ Оплата получена. Подписка активна 30 дней — можно оформлять договоры. /start",
-        }).catch(() => {});
+      const invoiceId = p.get("InvoiceId") || "";
+      let data = {};
+      try { data = JSON.parse(p.get("Data") || "{}"); } catch { /* ignore */ }
+      // ВАЖНО: касса общая с сайтом — обрабатываем ТОЛЬКО платежи бота
+      // (метка Data.cc="dkp" или InvoiceId, начинающийся с "dkp-"). Остальное игнорируем.
+      if (data.cc !== "dkp" && !invoiceId.startsWith("dkp-")) return json({ code: 0 });
+      if (env.SUBS && userId && (status === "Completed" || status === "Authorized")) {
+        const t = findTariff(env, data.plan, amount);
+        if (t && t.days) {
+          await grantSub(env, userId, t.days);
+          await tg(env, "sendMessage", {
+            chat_id: userId,
+            text: `✅ Оплата получена. Подписка «${t.title}» активна — можно оформлять договоры. /start`,
+          }).catch(() => {});
+        } else if (t) {
+          const n = await addCredits(env, userId, t.credits || 1);
+          await tg(env, "sendMessage", {
+            chat_id: userId,
+            text: `✅ Оплата получена. Доступно договоров: ${n}. /start`,
+          }).catch(() => {});
+        }
       }
       return json({ code: 0 });
     }
@@ -523,14 +577,24 @@ export default {
       const b = await request.json().catch(() => ({}));
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
-      // Платный режим: без активной подписки договор не отдаём.
-      if (subEnabled(env) && !(await subActive(env, auth.user.id)))
-        return json({ error: "sub_required" }, 402);
+      // Платный режим: нужен активный доступ — подписка ИЛИ разовый кредит (списывается).
+      let usedCredit = false;
+      if (subEnabled(env)) {
+        if (await subActive(env, auth.user.id)) { /* активная подписка — ок */ }
+        else if (await useCredit(env, auth.user.id)) { usedCredit = true; }
+        else return json({ error: "sub_required" }, 402);
+      }
       const base = b.filename || "ДКП";
-      if (b.docx_base64)
-        await sendDocument(env, auth.user.id, `${base}.docx`, b.docx_base64, "📄 Договор (Word)");
-      if (b.pdf_base64)
-        await sendDocument(env, auth.user.id, `${base}.pdf`, b.pdf_base64, "📄 Договор (PDF)");
+      try {
+        const r1 = b.docx_base64
+          ? await sendDocument(env, auth.user.id, `${base}.docx`, b.docx_base64, "📄 Договор (Word)") : null;
+        const r2 = b.pdf_base64
+          ? await sendDocument(env, auth.user.id, `${base}.pdf`, b.pdf_base64, "📄 Договор (PDF)") : null;
+        if ((r1 && !r1.ok) || (r2 && !r2.ok)) throw new Error("telegram_send");
+      } catch (e) {
+        if (usedCredit) await addCredits(env, auth.user.id, 1); // вернуть списанный кредит
+        return json({ error: "send_failed" }, 502);
+      }
       return json({ ok: true });
     }
 
