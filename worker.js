@@ -550,8 +550,8 @@ export default {
       const invoiceId = p.get("InvoiceId") || "";
       let data = {};
       try { data = JSON.parse(p.get("Data") || "{}"); } catch { /* ignore */ }
-      // ВАЖНО: касса общая с сайтом — обрабатываем ТОЛЬКО платежи бота
-      // (метка Data.cc="dkp" или InvoiceId, начинающийся с "dkp-"). Остальное игнорируем.
+      // Касса у бота отдельная, но платежи всё равно помечаем и проверяем метку
+      // (Data.cc="dkp" или InvoiceId "dkp-*") — страховка от чужих уведомлений.
       if (data.cc !== "dkp" && !invoiceId.startsWith("dkp-")) return json({ code: 0 });
       if (env.SUBS && userId && (status === "Completed" || status === "Authorized")) {
         const t = findTariff(env, data.plan, amount);

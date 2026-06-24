@@ -204,7 +204,7 @@ function payAndSubscribe(planKey) {
     description: `ДКП-бот — ${t.title}`,
     amount: t.price, currency: "RUB",
     accountId: uid, invoiceId: "dkp-" + uid + "-" + Date.now(),
-    data: { cc: "dkp", plan: t.key },     // метка платежа бота (касса общая с сайтом)
+    data: { cc: "dkp", plan: t.key },     // метка платежа бота (страховка на стороне воркера)
     skin: "mini",
   }, {
     onSuccess: async () => {
