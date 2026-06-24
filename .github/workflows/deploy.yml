@@ -1,0 +1,32 @@
+name: Deploy DKP bot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-worker:
+    if: ${{ vars.ENABLE_DKP_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+  deploy-mini-app:
+    if: ${{ vars.ENABLE_DKP_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Pages project (idempotent)
+        run: npx -y wrangler@3 pages project create dkp-mini --production-branch=main || true
+      - name: Deploy Mini App (Pages)
+        run: npx -y wrangler@3 pages deploy web --project-name=dkp-mini --branch=main --commit-dirty=true
