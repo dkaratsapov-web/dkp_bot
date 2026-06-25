@@ -202,6 +202,12 @@ async function recognizeYandex(env, mediaType, data, kind) {
     const skip = { car_brand: 1, sts_series: 1, sts_number: 1 };
     if (gpt) for (const k in gpt) { if (skip[k]) continue; if (gpt[k] && !fields[k]) fields[k] = gpt[k]; }
   }
+  // Марка/модель: спецмодель СТС нормализует (напр. «3er») — предпочитаем литеральный текст документа.
+  if (kind === "sts" || kind === "sts_back" || kind === "pts") {
+    const lit = brandFromText(fullText);
+    if (lit) fields.car_brand = lit;
+    if (fields.car_brand) fields.car_brand = fields.car_brand.toUpperCase();
+  }
   let _gender;
   if (kind === "passport") {
     const g = (entities.find((e) => (e.name || "").toLowerCase() === "gender")?.text || "").trim().toLowerCase();
@@ -269,13 +275,21 @@ function mapPassport(entities, fullText) {
 // Граница значения — перед следующей подписью (общая для СТС/ПТС).
 const STOP_LABEL = "(?=\\s*(?:категори|кузов|шасси|рама|двигател|мощност|об[ъь][её]м|цвет|масса|эколог|год|vin|идентификац|регистрац|разрешен|изготов|марк|модел|сери|номер|особ|паспорт|наимен|тип|разреш)|$)";
 
+// Марка/модель из сплошного текста СТС/ПТС — литеральная, как напечатано в документе.
+function brandFromText(t) {
+  const T = (t || "").replace(/\s+/g, " ");
+  const m = T.match(new RegExp("(?:марка|модель)\\s*(?:,?\\s*модель)?\\s*(?:тс)?\\s*[:№()]*\\s*([^,\\n]{2,40}?)" + STOP_LABEL, "i"));
+  const v = m ? (m[1] || "").replace(/\s+/g, " ").trim() : "";
+  return /[A-Za-zА-Яа-яЁё]/.test(v) ? v : "";
+}
+
 // Дозаполняет недостающие поля ТС из сплошного текста СТС/ПТС (page-OCR).
 function fillFromText(f, t) {
   const T = (t || "").replace(/\s+/g, " ");
   if (!T) return f;
   const grab = (re) => { const m = T.match(re); return m ? (m[1] || "").trim() : ""; };
   if (!f.car_vin) { const v = T.match(/\b[A-HJ-NPR-Z0-9]{17}\b/); if (v) f.car_vin = v[0]; }
-  if (!f.car_brand) { const br = grab(new RegExp("(?:марка|модель)\\s*(?:,?\\s*модель)?\\s*(?:тс)?\\s*[:№()]*\\s*([^,\\n]{2,40}?)" + STOP_LABEL, "i")); if (br) f.car_brand = br.replace(/\s+/g, " ").trim(); }
+  if (!f.car_brand) { const br = brandFromText(t); if (br) f.car_brand = br; }
   if (!f.car_year) { const y = T.match(/год\s*(?:выпуска|изготовлени[яе])\s*(?:тс)?\D{0,6}((?:19|20)\d{2})/i); if (y) f.car_year = y[1]; }
   if (!f.car_type) f.car_type = grab(new RegExp("тип\\s*тс[\\s:№]*([А-Яа-яЁё][А-Яа-яЁё \\-]{2,40}?)" + STOP_LABEL, "i"));
   if (!f.car_category) f.car_category = grab(/категори[ия]\s*(?:тс\s*)?[:№(]*\s*([ABCDEMАВСЕДМ]{1,2}\d?)\b/i);
@@ -288,8 +302,10 @@ function fillFromText(f, t) {
   if (!f.car_chassis) { const ch = grab(/(?:шасси|рама).{0,30}?(ОТСУТСТВУЕТ|[A-ZА-Я0-9]{6,22})/i); if (ch) f.car_chassis = ch.toUpperCase(); }
   if (!f.pts_issued) {
     // п.23 «Наименование организации, выдавшей паспорт» + п.25 «Дата выдачи паспорта».
-    const iss = grab(/выдавш[а-яё]+\s+паспорт[\s:№.]*([А-ЯЁA-Z][^0-9]{4,80}?)(?=\s*(?:\d|адрес)|$)/i);
-    const pd = (T.match(/дата\s+выдачи\s+паспорта[\s:№.]*(\d{2}\.\d{2}\.\d{4})/i) || [])[1] || "";
+    const iss = grab(/выдавш[а-яё]+\s+паспорт[\s:№.]*([А-ЯЁA-Z][^0-9]{4,80}?)(?=\s*(?:\d|адрес)|$)/i)
+      || grab(/наименовани\w*\s+организац\w*[^А-ЯA-Z0-9]{0,20}([А-ЯЁA-Z][^0-9]{4,80}?)(?=\s*(?:\d|адрес)|$)/i);
+    const pd = (T.match(/дата\s+выдачи\s+паспорта[\s:№.]*(\d{2}\.\d{2}\.\d{4})/i)
+      || T.match(/выдачи\s+паспорта[\s\S]{0,40}?(\d{2}\.\d{2}\.\d{4})/i) || [])[1] || "";
     const v = [iss.replace(/[,\s]+$/, ""), pd].filter(Boolean).join(", ");
     if (v) f.pts_issued = v;
   }
