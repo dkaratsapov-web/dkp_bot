@@ -50,8 +50,12 @@
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
   label { display: block; font-size: 13px; color: var(--hint); margin: 8px 0 3px; }
   input, select { width: 100%; padding: 9px 10px; font-size: 15px; border: 1px solid var(--line);
-          border-radius: 9px; background: var(--panel2); color: var(--fg); }
+          border-radius: 9px; background: var(--panel2); color: var(--fg); min-height: 40px; }
   input::placeholder { color: #5c6b82; }
+  /* Нормализация поля даты на мобильных (iOS): высота, выравнивание, иконка календаря */
+  input[type="date"] { -webkit-appearance: none; appearance: none; }
+  input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+  input[type="date"]::-webkit-calendar-picker-indicator { opacity: .55; filter: invert(.7); cursor: pointer; }
   .row { display: flex; gap: 8px; } .row > div { flex: 1; }
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
   .seg button { flex: 1; min-width: 70px; padding: 8px; border: 1px solid var(--line); border-radius: 9px;
