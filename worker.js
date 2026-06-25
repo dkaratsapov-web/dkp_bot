@@ -557,6 +557,18 @@ async function handleUpdate(env, update) {
     return;
   }
 
+  if (text === "/reset") {
+    if (env.SUBS) {
+      await env.SUBS.delete("credits:" + chatId);
+      await env.SUBS.delete("sub:" + chatId);
+    }
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text: "🔄 Сброшено: договоры и подписка обнулены. Откройте /start, чтобы оформить заново.",
+    });
+    return;
+  }
+
   await tg(env, "sendMessage", {
     chat_id: chatId,
     text: "Напишите /start, чтобы оформить договор.",
