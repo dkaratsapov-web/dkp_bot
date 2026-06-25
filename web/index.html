@@ -79,7 +79,7 @@
 </head>
 <body>
 <div class="appbar">
-  <div class="brand"><span class="b1">БЕЗОПАСНЫЙ</span><span class="b2">АВТО<b>ПОДБОР</b></span></div>
+  <div class="brand"><span class="b1">БЕЗОПАСНЫЙ</span><span class="b2"><b>ДОГОВОР</b></span></div>
   <div class="bar"></div>
   <div class="t1">Договор купли-продажи ТС</div>
   <div class="t2">фото паспорта и СТС → готовый договор</div>
@@ -163,6 +163,12 @@ const tg = window.Telegram?.WebApp; tg?.ready(); tg?.expand();
 // Адрес задеплоенного воркера ДКП-бота:
 const WORKER = "https://dkp-bot.d-karatsapov.workers.dev";
 
+// initData для авторизации. После оплаты (возврат с Тинькофф в том же окне) Telegram
+// не передаёт initData заново — восстанавливаем из sessionStorage.
+let initData = tg?.initData || "";
+try { if (!initData) initData = sessionStorage.getItem("dkp_initData") || ""; } catch (e) {}
+try { if (initData) sessionStorage.setItem("dkp_initData", initData); } catch (e) {}
+
 /* ---------- Доступ и оплата (CloudPayments) ---------- */
 let subCfg = { subEnabled: false, provider: "", cpPublicId: "", tariffs: [] };
 let subIsActive = true;                       // есть доступ: подписка ИЛИ кредит
@@ -173,15 +179,26 @@ async function loadSub() {
     if (!subCfg.subEnabled) { subIsActive = true; return; }
     const s = await (await fetch(WORKER + "/api/sub-status", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ initData: tg?.initData || "" }),
+      body: JSON.stringify({ initData: initData }),
     })).json();
     subIsActive = !!s.active;
     subInfo = { sub: !!s.sub, credits: s.credits || 0, until: s.until || 0 };
   } catch { subIsActive = true; }
 }
-// Первый экран — всегда окно доступа (показано сразу, до ответа сервера),
-// затем наполняем тарифами/статусом; если платный режим выключен — прячем.
-loadSub().then(() => { if (subCfg.subEnabled) openPaywall(); else closePaywall(); });
+// Первый экран — всегда окно доступа; обрабатываем возврат с оплаты (?dkp=paid/fail).
+loadSub().then(async () => {
+  const ret = new URLSearchParams(location.search).get("dkp");
+  if (ret) {
+    history.replaceState(null, "", location.pathname);
+    restoreForm();
+    if (ret === "paid") {                       // ждём подтверждения вебхука Тинькофф
+      for (let i = 0; i < 20 && !subIsActive; i++) { await new Promise((s) => setTimeout(s, 2000)); await loadSub(); }
+    }
+  }
+  if (subCfg.subEnabled && !subIsActive) openPaywall(); else closePaywall();
+  if (ret === "paid") tg?.showAlert?.(subIsActive ? "Оплата получена — доступ открыт!" : "Оплата получена. Доступ появится в течение минуты.");
+  else if (ret === "fail") tg?.showAlert?.("Оплата не завершена.");
+});
 
 // Разделы с видами оплат: рисуем карточки тарифов из конфига воркера.
 function renderTariffs() {
@@ -209,20 +226,41 @@ function openPaywall() {
 }
 function closePaywall() { document.getElementById("paywall").style.display = "none"; }
 
-// Оплата через Тинькофф: создаём платёж на сервере, открываем ссылку, ждём активацию доступа.
+// Оплата через Тинькофф: создаём платёж и открываем оплату В ТОМ ЖЕ ОКНЕ.
+// Перед уходом сохраняем форму и initData; Тинькофф вернёт обратно (?dkp=paid) — восстановим.
 async function payTinkoff(t) {
   try {
     const r = await fetch(WORKER + "/api/pay/init", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ initData: tg?.initData || "", plan: t.key }),
+      body: JSON.stringify({ initData: initData, plan: t.key }),
     });
     const d = await r.json();
     if (!d.paymentUrl) { tg?.showAlert?.("Оплата недоступна: " + (d.error || d.detail || "")); return; }
-    if (tg?.openLink) tg.openLink(d.paymentUrl); else window.open(d.paymentUrl, "_blank");
-    tg?.showAlert?.("Открыли страницу оплаты. После оплаты вернитесь в бот — доступ откроется автоматически.");
-    for (let i = 0; i < 40 && !subIsActive; i++) { await new Promise((res) => setTimeout(res, 3000)); await loadSub(); }
-    if (subIsActive) { closePaywall(); tg?.showAlert?.("Доступ открыт! Можно оформить договор."); }
+    try { sessionStorage.setItem("dkp_initData", initData); saveForm(); } catch (e) {}
+    window.location.href = d.paymentUrl;     // оплата в том же окне (без новой вкладки)
   } catch (e) { tg?.showAlert?.("Ошибка оплаты: " + (e.message || e)); }
+}
+// Сохранение/восстановление формы при уходе на оплату и возврате.
+function saveForm() {
+  try {
+    const d = { __type: partyType, __gender: partyGender };
+    document.querySelectorAll("input, select").forEach((el) => {
+      if (!el.id) return; d[el.id] = el.type === "checkbox" ? el.checked : el.value;
+    });
+    sessionStorage.setItem("dkp_form", JSON.stringify(d));
+  } catch (e) {}
+}
+function restoreForm() {
+  try {
+    const raw = sessionStorage.getItem("dkp_form"); if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d.__type) { setType("seller", d.__type.seller || "person"); setType("buyer", d.__type.buyer || "person"); }
+    if (d.__gender) { setGender("seller", d.__gender.seller || "m"); setGender("buyer", d.__gender.buyer || "m"); }
+    document.querySelectorAll("input, select").forEach((el) => {
+      if (el.id && el.id in d) { if (el.type === "checkbox") el.checked = d[el.id]; else el.value = d[el.id]; }
+    });
+    sessionStorage.removeItem("dkp_form");
+  } catch (e) {}
 }
 function payAndSubscribe(planKey) {
   const t = (subCfg.tariffs || []).find((x) => x.key === planKey);
@@ -376,7 +414,7 @@ async function recognize(file, kind, statusEl, applyPrefix) {
     const image = await fileToDataUrl(file);
     const r = await fetch(WORKER + "/api/recognize", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ initData: tg?.initData || "", image, kind }),
+      body: JSON.stringify({ initData: initData, image, kind }),
     });
     const data = await r.json();
     if (data.error) {
@@ -628,7 +666,7 @@ async function sendGenerated() {
     const r = await fetch(WORKER + "/api/send", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        initData: tg?.initData || "", filename: gen.name,
+        initData: initData, filename: gen.name,
         docx_base64: bufToB64(gen.docx), pdf_base64: bufToB64(gen.pdf),
       }),
     });
