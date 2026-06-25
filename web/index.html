@@ -195,7 +195,7 @@ loadSub().then(async () => {
       for (let i = 0; i < 20 && !subIsActive; i++) { await new Promise((s) => setTimeout(s, 2000)); await loadSub(); }
     }
   }
-  if (subCfg.subEnabled && !subIsActive) openPaywall(); else closePaywall();
+  if (subCfg.subEnabled) openPaywall(); else closePaywall();   // окно доступа показываем всегда (статус или тарифы)
   if (ret === "paid") tg?.showAlert?.(subIsActive ? "Оплата получена — доступ открыт!" : "Оплата получена. Доступ появится в течение минуты.");
   else if (ret === "fail") tg?.showAlert?.("Оплата не завершена.");
 });
