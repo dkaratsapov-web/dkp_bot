@@ -73,6 +73,7 @@
           box-shadow: 0 6px 18px #2b7de955; }
   .hint { font-size: 12px; color: var(--hint); margin: 4px 0; }
   .badge { font-size: 11px; color: var(--hint); }
+  .legal { font-size: 11px; color: var(--hint); text-align: center; line-height: 1.5; margin: 22px 0 4px; }
   .org-only, .person-only { display: none; }
 </style>
 </head>
@@ -128,6 +129,8 @@
   <input id="price_words" placeholder="Один миллион восемьсот пятьдесят тысяч" />
 </div>
 
+<div class="legal">ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</div>
+
 <button class="submit" id="go" onclick="generate()">Сформировать договор</button>
 
 <div id="paywall" style="display:flex;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
@@ -138,8 +141,9 @@
   <div style="flex:1;overflow:auto;padding:14px">
     <p class="hint" id="paywall-status" style="margin:0 0 12px">Проверяем доступ…</p>
     <div id="tariffs"></div>
-    <p class="hint" style="margin-top:14px">Оплата проходит через защищённый виджет CloudPayments.
+    <p class="hint" style="margin-top:14px">Оплата проходит через защищённый платёжный сервис.
        Доступ открывается автоматически после оплаты.</p>
+    <p class="hint" style="margin-top:10px">Продавец: ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</p>
   </div>
 </div>
 
