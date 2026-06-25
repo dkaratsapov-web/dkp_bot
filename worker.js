@@ -497,12 +497,15 @@ async function tinkoffToken(params, password) {
 }
 // Создаём платёж в Тинькофф → ссылка на оплату. OrderId кодирует userId и ключ тарифа.
 async function tinkoffInit(env, userId, tariff, origin) {
+  const app = env.MINI_APP_URL || origin;
   const body = {
     TerminalKey: env.TINKOFF_TERMINAL_KEY,
     Amount: Math.round(tariff.price * 100),       // в копейках
     OrderId: `dkp_${userId}_${tariff.key}_${Date.now()}`,
     Description: `ДКП-бот — ${tariff.title}`,
     NotificationURL: `${origin}/api/tinkoff/webhook`,
+    SuccessURL: `${app}?dkp=paid`,                // возврат в мини-апп (тот же webview)
+    FailURL: `${app}?dkp=fail`,
   };
   body.Token = await tinkoffToken(body, env.TINKOFF_PASSWORD);
   const r = await fetch("https://securepay.tinkoff.ru/v2/Init", {
