@@ -160,7 +160,7 @@ const tg = window.Telegram?.WebApp; tg?.ready(); tg?.expand();
 const WORKER = "https://dkp-bot.d-karatsapov.workers.dev";
 
 /* ---------- Доступ и оплата (CloudPayments) ---------- */
-let subCfg = { subEnabled: false, cpPublicId: "", tariffs: [] };
+let subCfg = { subEnabled: false, provider: "", cpPublicId: "", tariffs: [] };
 let subIsActive = true;                       // есть доступ: подписка ИЛИ кредит
 let subInfo = { sub: false, credits: 0, until: 0 };
 async function loadSub() {
@@ -205,9 +205,25 @@ function openPaywall() {
 }
 function closePaywall() { document.getElementById("paywall").style.display = "none"; }
 
+// Оплата через Тинькофф: создаём платёж на сервере, открываем ссылку, ждём активацию доступа.
+async function payTinkoff(t) {
+  try {
+    const r = await fetch(WORKER + "/api/pay/init", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData: tg?.initData || "", plan: t.key }),
+    });
+    const d = await r.json();
+    if (!d.paymentUrl) { tg?.showAlert?.("Оплата недоступна: " + (d.error || d.detail || "")); return; }
+    if (tg?.openLink) tg.openLink(d.paymentUrl); else window.open(d.paymentUrl, "_blank");
+    tg?.showAlert?.("Открыли страницу оплаты. После оплаты вернитесь в бот — доступ откроется автоматически.");
+    for (let i = 0; i < 40 && !subIsActive; i++) { await new Promise((res) => setTimeout(res, 3000)); await loadSub(); }
+    if (subIsActive) { closePaywall(); tg?.showAlert?.("Доступ открыт! Можно оформить договор."); }
+  } catch (e) { tg?.showAlert?.("Ошибка оплаты: " + (e.message || e)); }
+}
 function payAndSubscribe(planKey) {
   const t = (subCfg.tariffs || []).find((x) => x.key === planKey);
   if (!t) return;
+  if (subCfg.provider === "tinkoff") return payTinkoff(t);
   if (!subCfg.cpPublicId || !window.cp) { tg?.showAlert?.("Оплата временно недоступна."); return; }
   const uid = String(tg?.initDataUnsafe?.user?.id || "");
   const widget = new cp.CloudPayments();

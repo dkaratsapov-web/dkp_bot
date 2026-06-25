@@ -393,7 +393,13 @@ async function recognizeAnthropic(env, mediaType, data, kind) {
 
 /* ---------- Тарифы / доступ (Cloudflare KV + CloudPayments) ---------- */
 // Платный режим включён, только когда заданы KV-биндинг SUBS и Public ID CloudPayments.
-function subEnabled(env) { return !!(env.SUBS && env.CP_PUBLIC_ID); }
+// Платёжный провайдер: Тинькофф (если заданы ключ+пароль), иначе CloudPayments, иначе выкл.
+function payProvider(env) {
+  if (env.TINKOFF_TERMINAL_KEY && env.TINKOFF_PASSWORD) return "tinkoff";
+  if (env.CP_PUBLIC_ID) return "cloudpayments";
+  return "";
+}
+function subEnabled(env) { return !!(env.SUBS && payProvider(env)); }
 function num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; }
 
 // Виды оплаты: разовый доступ (кредит на 1 договор) + подписки на срок.
@@ -454,6 +460,42 @@ async function cpVerify(env, rawBody, hmacHeader) {
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(rawBody)));
   let bin = ""; for (const b of sig) bin += String.fromCharCode(b);
   return btoa(bin) === hmacHeader;
+}
+
+/* ---------- Tinkoff (Т-Касса) эквайринг ---------- */
+async function sha256hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", enc.encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// Подпись Тинькофф: корневые скалярные параметры (+ Password, без Token), сорт по ключу, конкатенация значений → SHA-256.
+async function tinkoffToken(params, password) {
+  const src = { ...params, Password: password };
+  delete src.Token;
+  const keys = Object.keys(src).filter((k) => {
+    const v = src[k];
+    return v !== null && v !== undefined && typeof v !== "object";
+  }).sort();
+  const str = keys.map((k) => (typeof src[k] === "boolean" ? (src[k] ? "true" : "false") : String(src[k]))).join("");
+  return sha256hex(str);
+}
+// Создаём платёж в Тинькофф → ссылка на оплату. OrderId кодирует userId и ключ тарифа.
+async function tinkoffInit(env, userId, tariff, origin) {
+  const body = {
+    TerminalKey: env.TINKOFF_TERMINAL_KEY,
+    Amount: Math.round(tariff.price * 100),       // в копейках
+    OrderId: `dkp_${userId}_${tariff.key}_${Date.now()}`,
+    Description: `ДКП-бот — ${tariff.title}`,
+    NotificationURL: `${origin}/api/tinkoff/webhook`,
+  };
+  body.Token = await tinkoffToken(body, env.TINKOFF_PASSWORD);
+  const r = await fetch("https://securepay.tinkoff.ru/v2/Init", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!out.Success || !out.PaymentURL)
+    return { error: "init_failed", detail: out.Message || out.Details || ("code " + out.ErrorCode) };
+  return { paymentUrl: out.PaymentURL };
 }
 
 /* ---------- Webhook (сообщения боту) ---------- */
@@ -522,8 +564,8 @@ export default {
     // Публичный конфиг для мини-аппа (Public ID, тарифы, включён ли платный режим)
     if (url.pathname === "/api/config") {
       return json({
-        subEnabled: subEnabled(env), cpPublicId: env.CP_PUBLIC_ID || "",
-        tariffs: tariffs(env),
+        subEnabled: subEnabled(env), provider: payProvider(env),
+        cpPublicId: env.CP_PUBLIC_ID || "", tariffs: tariffs(env),
       });
     }
 
@@ -537,6 +579,45 @@ export default {
       const cr = await credits(env, auth.user.id);
       // active — есть ли доступ (подписка ИЛИ хотя бы один кредит).
       return json({ enabled: true, active: until > Date.now() || cr > 0, sub: until > Date.now(), until, credits: cr });
+    }
+
+    // Создать платёж Тинькофф → вернуть ссылку на оплату
+    if (url.pathname === "/api/pay/init" && request.method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
+      if (!auth.ok) return json({ error: "unauthorized" }, 401);
+      if (payProvider(env) !== "tinkoff") return json({ error: "not_tinkoff" }, 400);
+      const t = findTariff(env, b.plan);
+      if (!t) return json({ error: "bad_plan" }, 400);
+      const res = await tinkoffInit(env, auth.user.id, t, url.origin);
+      return json(res, res.error ? 502 : 200);
+    }
+
+    // Уведомление Тинькофф об оплате. Доступ выдаётся здесь.
+    if (url.pathname === "/api/tinkoff/webhook" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      if (!env.TINKOFF_PASSWORD) return new Response("OK");
+      if ((await tinkoffToken(body, env.TINKOFF_PASSWORD)) !== body.Token) return new Response("OK"); // подделка — игнор
+      const parts = String(body.OrderId || "").split("_");   // dkp_<userId>_<plan>_<ts>
+      const userId = parts[1], planKey = parts[2];
+      const amount = Number(body.Amount || 0) / 100;          // из копеек
+      if (env.SUBS && userId && body.Success && body.Status === "CONFIRMED") {
+        const payKey = "tpay:" + body.PaymentId;
+        if (await env.SUBS.get(payKey)) return new Response("OK");   // идемпотентность
+        const t = findTariff(env, planKey, amount);
+        if (t) {
+          await env.SUBS.put(payKey, "1",
+            { expirationTtl: 60 * 60 * 24 * 400, metadata: { a: amount, p: t.key, t: Date.now(), k: t.days ? "sub" : "credit" } });
+          if (t.days) {
+            await grantSub(env, userId, t.days);
+            await tg(env, "sendMessage", { chat_id: userId, text: `✅ Оплата получена. Подписка «${t.title}» активна — можно оформлять договоры. /start` }).catch(() => {});
+          } else {
+            const n = await addCredits(env, userId, t.credits || 1);
+            await tg(env, "sendMessage", { chat_id: userId, text: `✅ Оплата получена. Доступно договоров: ${n}. /start` }).catch(() => {});
+          }
+        }
+      }
+      return new Response("OK");
     }
 
     // Уведомление CloudPayments об оплате (Pay). Доступ выдаётся ТОЛЬКО здесь.

@@ -4,7 +4,8 @@
 # Секреты (НЕ здесь, только в дашборде → Variables and Secrets → Secret):
 #   TELEGRAM_BOT_TOKEN — токен бота (@BotFather)
 #   YANDEX_API_KEY     — ключ Яндекс (OCR + YandexGPT)
-#   CP_API_SECRET      — «Пароль для API» CloudPayments (проверка подписи webhook)
+#   TINKOFF_PASSWORD   — пароль терминала Тинькофф (подпись запросов/уведомлений)
+#   CP_API_SECRET      — «Пароль для API» CloudPayments (если используется CloudPayments)
 
 name = "dkp-bot"
 main = "worker.js"
@@ -15,10 +16,11 @@ compatibility_date = "2024-11-01"
 MINI_APP_URL = "https://dkp-mini.pages.dev"
 # Folder ID Яндекс Облака (для OCR/GPT).
 YANDEX_FOLDER_ID = "b1gljk9huj8ot3pn8g1c"
-# --- Оплата (CloudPayments). Платный режим включается, когда задан CP_PUBLIC_ID и привязан KV ниже. ---
-# У бота ОТДЕЛЬНАЯ касса (своя, не общая с сайтом): свой Public ID + API Secret + свой Pay-вебхук.
-# Платежи дополнительно помечаются Data.cc="dkp" + InvoiceId "dkp-*" (страховка).
-CP_PUBLIC_ID = "pk_56596b2cd1243f83767ce21392917"   # Public ID кассы бота (pk_...), публичный
+# --- Оплата. Провайдер: Тинькофф (Т-Касса) — если задан TINKOFF_TERMINAL_KEY + секрет TINKOFF_PASSWORD. ---
+# Иначе CloudPayments (если задан CP_PUBLIC_ID). Платный режим требует ещё и KV SUBS ниже.
+TINKOFF_TERMINAL_KEY = "1782385049405DEMO"   # терминал Тинькофф (тестовый «…DEMO»); боевой — 1782385049424
+# Секрет TINKOFF_PASSWORD задаётся в дашборде Cloudflare (Variables and Secrets → Secret), НЕ здесь.
+CP_PUBLIC_ID = ""          # CloudPayments отключён (перешли на Тинькофф)
 # Тарифы (₽). Можно не задавать — действуют значения по умолчанию из worker.js.
 PRICE_ONE = "49"           # один договор (разовый доступ) — ВРЕМЕННО 49₽ для теста (вернуть 99)
 PRICE_1M  = "500"          # подписка 1 месяц
