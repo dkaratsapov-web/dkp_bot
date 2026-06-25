@@ -180,6 +180,36 @@ async function yandexGptExtract(env, fullText) {
   } catch { return null; }
 }
 
+// Узкий экстрактор адреса прописки из текста страницы регистрации паспорта.
+async function yandexGptAddress(env, fullText) {
+  try {
+    const r = await fetch("https://llm.api.cloud.yandex.net/foundationModels/v1/completion", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: "Api-Key " + env.YANDEX_API_KEY },
+      body: JSON.stringify({
+        modelUri: `gpt://${env.YANDEX_FOLDER_ID}/yandexgpt/latest`,
+        completionOptions: { temperature: 0, maxTokens: 200 },
+        messages: [
+          { role: "system", text:
+            "На входе — распознанный текст страницы регистрации (прописки) паспорта РФ. " +
+            "Собери адрес регистрации ОДНОЙ строкой в порядке: индекс (если есть), область/край/респ., " +
+            "район (если есть), город/населённый пункт, улица, дом, корпус, квартира. " +
+            "НЕ включай слова «зарегистрирован», «место жительства», даты, наименования органов " +
+            "(УФМС/ФМС/МВД/отдел по вопросам миграции), коды подразделений, подписи. " +
+            "Сокращения приведи к виду: «обл.», «г.», «ул.», «д.», «кв.». " +
+            "Верни СТРОГО JSON {\"address\":\"...\"}. Если адреса нет — {\"address\":\"\"}." },
+          { role: "user", text: (fullText || "").slice(0, 4000) },
+        ],
+      }),
+    });
+    if (!r.ok) return "";
+    const out = await r.json();
+    const text = out.result?.alternatives?.[0]?.message?.text || "";
+    const obj = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    return typeof obj.address === "string" ? obj.address.trim() : "";
+  } catch { return ""; }
+}
+
 async function recognizeYandex(env, mediaType, data, kind) {
   const res = await yandexOcr(env, mediaType, data, YA_MODEL[kind] || "page");
   if (res.error) return res;
@@ -196,7 +226,11 @@ async function recognizeYandex(env, mediaType, data, kind) {
     : kind === "reg" ? mapReg(fullText)
     : mapOrg(fullText);
   // YandexGPT добирает поля из распознанного текста (устойчиво к разным формам ПТС/СТС).
-  if (fullText && env.YANDEX_FOLDER_ID) {
+  if (kind === "reg" && env.YANDEX_FOLDER_ID && fullText) {
+    // Страница прописки: адрес собираем узким промптом (чище, чем регэксп mapReg).
+    const a = await yandexGptAddress(env, fullText);
+    if (a) fields.address = a;
+  } else if (fullText && env.YANDEX_FOLDER_ID) {
     const gpt = await yandexGptExtract(env, fullText);
     // Марку и серию/номер СТС GPT не доверяем (нормализует/путает) — берём из документа.
     const skip = { car_brand: 1, sts_series: 1, sts_number: 1 };
