@@ -18,7 +18,7 @@ MINI_APP_URL = "https://dkp-mini.pages.dev"
 YANDEX_FOLDER_ID = "b1gljk9huj8ot3pn8g1c"
 # --- Оплата. Провайдер: Тинькофф (Т-Касса) — если задан TINKOFF_TERMINAL_KEY + секрет TINKOFF_PASSWORD. ---
 # Иначе CloudPayments (если задан CP_PUBLIC_ID). Платный режим требует ещё и KV SUBS ниже.
-TINKOFF_TERMINAL_KEY = "1782385049405DEMO"   # терминал Тинькофф (тестовый «…DEMO»); боевой — 1782385049424
+TINKOFF_TERMINAL_KEY = "1782385049424"   # терминал Тинькофф (БОЕВОЙ); тестовый — 1782385049405DEMO
 # Секрет TINKOFF_PASSWORD задаётся в дашборде Cloudflare (Variables and Secrets → Secret), НЕ здесь.
 CP_PUBLIC_ID = ""          # CloudPayments отключён (перешли на Тинькофф)
 # Тарифы (₽). Можно не задавать — действуют значения по умолчанию из worker.js.
