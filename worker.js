@@ -448,15 +448,16 @@ async function credits(env, userId) {
 }
 async function addCredits(env, userId, n) {
   const next = (await credits(env, userId)) + (Number(n) || 1);
-  await env.SUBS.put("credits:" + userId, String(next));
+  await env.SUBS.put("credits:" + userId, String(next), { metadata: { n: next } });
   return next;
 }
-// Списать один кредит. true — если был и списан.
+// Списать один кредит. Возвращает остаток (>=0) или null, если кредитов не было.
 async function useCredit(env, userId) {
   const cur = await credits(env, userId);
-  if (cur <= 0) return false;
-  await env.SUBS.put("credits:" + userId, String(cur - 1));
-  return true;
+  if (cur <= 0) return null;
+  const left = cur - 1;
+  await env.SUBS.put("credits:" + userId, String(left), { metadata: { n: left } });
+  return left;
 }
 
 // Выдать/продлить подписку на N дней (продление — от текущего конца, если ещё активна).
@@ -691,11 +692,15 @@ export default {
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       // Платный режим: нужен активный доступ — подписка ИЛИ разовый кредит (списывается).
-      let usedCredit = false;
+      let usedCredit = false, remainingCredits = null, subUntilMs = 0;
       if (subEnabled(env)) {
-        if (await subActive(env, auth.user.id)) { /* активная подписка — ок */ }
-        else if (await useCredit(env, auth.user.id)) { usedCredit = true; }
-        else return json({ error: "sub_required" }, 402);
+        const until = await subUntil(env, auth.user.id);
+        if (until > Date.now()) { subUntilMs = until; }                   // активная подписка — кредит не тратим
+        else {
+          const left = await useCredit(env, auth.user.id);
+          if (left === null) return json({ error: "sub_required" }, 402); // нет ни подписки, ни кредитов
+          usedCredit = true; remainingCredits = left;
+        }
       }
       const base = b.filename || "ДКП";
       try {
@@ -708,7 +713,7 @@ export default {
         if (usedCredit) await addCredits(env, auth.user.id, 1); // вернуть списанный кредит
         return json({ error: "send_failed" }, 502);
       }
-      return json({ ok: true });
+      return json({ ok: true, credits: remainingCredits, sub: subUntilMs || undefined });
     }
 
     // health
