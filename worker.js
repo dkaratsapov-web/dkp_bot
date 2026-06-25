@@ -522,6 +522,21 @@ async function handleUpdate(env, update) {
     return;
   }
 
+  if (text === "/info" || text === "/about") {
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      parse_mode: "Markdown",
+      text:
+        "ℹ️ *О сервисе*\n\n" +
+        "Бот формирует договор купли-продажи транспортного средства (ДКП).\n\n" +
+        "*Реквизиты продавца:*\n" +
+        "Индивидуальный предприниматель Букин Матвей Игоревич\n" +
+        "ИНН: 502481713312\n" +
+        "ОГРНИП: 325774600438571",
+    });
+    return;
+  }
+
   await tg(env, "sendMessage", {
     chat_id: chatId,
     text: "Напишите /start, чтобы оформить договор.",
