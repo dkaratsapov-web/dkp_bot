@@ -130,13 +130,13 @@
 
 <button class="submit" id="go" onclick="generate()">Сформировать договор</button>
 
-<div id="paywall" style="display:none;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
+<div id="paywall" style="display:flex;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
   <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
-    <b id="paywall-title" style="flex:1;font-size:16px">Выберите доступ</b>
-    <button id="paywall-close" class="btn sec" onclick="closePaywall()">Закрыть</button>
+    <b id="paywall-title" style="flex:1;font-size:16px">Доступ</b>
+    <button id="paywall-close" class="btn sec" onclick="closePaywall()" style="display:none">Закрыть</button>
   </div>
   <div style="flex:1;overflow:auto;padding:14px">
-    <p class="hint" id="paywall-status" style="margin:0 0 12px"></p>
+    <p class="hint" id="paywall-status" style="margin:0 0 12px">Проверяем доступ…</p>
     <div id="tariffs"></div>
     <p class="hint" style="margin-top:14px">Оплата проходит через защищённый виджет CloudPayments.
        Доступ открывается автоматически после оплаты.</p>
@@ -175,8 +175,9 @@ async function loadSub() {
     subInfo = { sub: !!s.sub, credits: s.credits || 0, until: s.until || 0 };
   } catch { subIsActive = true; }
 }
-// Первый экран — всегда окно доступа: выбор тарифа либо статус текущей подписки/кредитов.
-loadSub().then(() => { if (subCfg.subEnabled) openPaywall(); });
+// Первый экран — всегда окно доступа (показано сразу, до ответа сервера),
+// затем наполняем тарифами/статусом; если платный режим выключен — прячем.
+loadSub().then(() => { if (subCfg.subEnabled) openPaywall(); else closePaywall(); });
 
 // Разделы с видами оплат: рисуем карточки тарифов из конфига воркера.
 function renderTariffs() {
@@ -196,7 +197,9 @@ function openPaywall() {
   else st = "Чтобы получить готовый договор, выберите тариф:";
   document.getElementById("paywall-status").textContent = st;
   document.getElementById("paywall-title").textContent = hasAccess ? "Ваш доступ" : "Выберите тариф";
-  document.getElementById("paywall-close").textContent = hasAccess ? "Продолжить →" : "Закрыть";
+  const cb = document.getElementById("paywall-close");
+  cb.textContent = hasAccess ? "Продолжить →" : "Закрыть";
+  cb.style.display = "";
   renderTariffs();
   document.getElementById("paywall").style.display = "flex";
 }
