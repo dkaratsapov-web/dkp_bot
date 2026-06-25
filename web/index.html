@@ -132,8 +132,8 @@
 
 <div id="paywall" style="display:none;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
   <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
-    <b style="flex:1;font-size:16px">Выберите доступ</b>
-    <button class="btn sec" onclick="closePaywall()">Закрыть</button>
+    <b id="paywall-title" style="flex:1;font-size:16px">Выберите доступ</b>
+    <button id="paywall-close" class="btn sec" onclick="closePaywall()">Закрыть</button>
   </div>
   <div style="flex:1;overflow:auto;padding:14px">
     <p class="hint" id="paywall-status" style="margin:0 0 12px"></p>
@@ -175,8 +175,8 @@ async function loadSub() {
     subInfo = { sub: !!s.sub, credits: s.credits || 0, until: s.until || 0 };
   } catch { subIsActive = true; }
 }
-// На старте показываем экран тарифов, если платный режим включён и доступа ещё нет.
-loadSub().then(() => { if (subCfg.subEnabled && !subIsActive) openPaywall(); });
+// Первый экран — всегда окно доступа: выбор тарифа либо статус текущей подписки/кредитов.
+loadSub().then(() => { if (subCfg.subEnabled) openPaywall(); });
 
 // Разделы с видами оплат: рисуем карточки тарифов из конфига воркера.
 function renderTariffs() {
@@ -189,11 +189,14 @@ function renderTariffs() {
      </button>`).join("");
 }
 function openPaywall() {
+  const hasAccess = subIsActive;            // активная подписка ИЛИ есть кредит
   let st;
-  if (subInfo.sub && subInfo.until) st = "Подписка активна до " + new Date(subInfo.until).toLocaleDateString("ru-RU") + ".";
-  else if (subInfo.credits > 0) st = "Доступно договоров: " + subInfo.credits + ".";
-  else st = "Чтобы получить готовый договор, выберите вариант оплаты:";
+  if (subInfo.sub && subInfo.until) st = "✅ Подписка активна до " + new Date(subInfo.until).toLocaleDateString("ru-RU") + ". Можно продлить или продолжить оформление.";
+  else if (subInfo.credits > 0) st = "✅ Доступно договоров: " + subInfo.credits + ". Можно докупить или продолжить оформление.";
+  else st = "Чтобы получить готовый договор, выберите тариф:";
   document.getElementById("paywall-status").textContent = st;
+  document.getElementById("paywall-title").textContent = hasAccess ? "Ваш доступ" : "Выберите тариф";
+  document.getElementById("paywall-close").textContent = hasAccess ? "Продолжить →" : "Закрыть";
   renderTariffs();
   document.getElementById("paywall").style.display = "flex";
 }
