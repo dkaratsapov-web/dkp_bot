@@ -450,6 +450,10 @@ function payProvider(env) {
   return "";
 }
 function subEnabled(env) { return !!(env.SUBS && payProvider(env)); }
+// Админы (через запятую в ADMIN_IDS) — доступ без оплаты.
+function isAdmin(env, userId) {
+  return String(env.ADMIN_IDS || "").split(",").map((s) => s.trim()).filter(Boolean).includes(String(userId));
+}
 function num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; }
 
 // Виды оплаты: разовый доступ (кредит на 1 договор) + подписки на срок.
@@ -591,6 +595,14 @@ async function handleUpdate(env, update) {
     return;
   }
 
+  if (text === "/id" || text === "/myid") {
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text: "Ваш Telegram ID: " + chatId + (isAdmin(env, chatId) ? "\n✅ Вы админ — оформление без оплаты." : ""),
+    });
+    return;
+  }
+
   if (text === "/reset") {
     if (env.SUBS) {
       await env.SUBS.delete("credits:" + chatId);
@@ -656,6 +668,7 @@ export default {
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       if (!subEnabled(env)) return json({ enabled: false, active: true });
+      if (isAdmin(env, auth.user.id)) return json({ enabled: true, active: true, admin: true });
       const until = await subUntil(env, auth.user.id);
       const cr = await credits(env, auth.user.id);
       // active — есть ли доступ (подписка ИЛИ хотя бы один кредит).
@@ -741,8 +754,9 @@ export default {
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       // Платный режим: нужен активный доступ — подписка ИЛИ разовый кредит (списывается).
+      // Админ — без оплаты.
       let usedCredit = false, remainingCredits = null, subUntilMs = 0;
-      if (subEnabled(env)) {
+      if (subEnabled(env) && !isAdmin(env, auth.user.id)) {
         const until = await subUntil(env, auth.user.id);
         if (until > Date.now()) { subUntilMs = until; }                   // активная подписка — кредит не тратим
         else {
