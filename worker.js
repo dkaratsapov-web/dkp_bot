@@ -732,6 +732,40 @@ async function handleUpdate(env, update) {
   });
 }
 
+/* ---------- MAX messenger Bot API ---------- */
+function maxBase(env) { return (env.MAX_API_BASE || "https://botapi.max.ru").replace(/\/$/, ""); }
+async function maxApi(env, method, path, body) {
+  const sep = path.includes("?") ? "&" : "?";
+  const u = `${maxBase(env)}${path}${sep}access_token=${encodeURIComponent(env.MAX_TOKEN || "")}`;
+  return fetch(u, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+async function maxSend(env, chatId, text, attachments) {
+  if (!chatId) return;
+  const body = { text };
+  if (attachments) body.attachments = attachments;
+  return maxApi(env, "POST", `/messages?chat_id=${chatId}`, body).catch(() => {});
+}
+// chat_id из разных форматов апдейта MAX (уточним по /max/last).
+function maxChatId(u) {
+  return u.chat_id || u.message?.recipient?.chat_id || u.message?.chat_id
+    || u.callback?.message?.recipient?.chat_id || u.message?.sender?.user_id || u.user?.user_id || null;
+}
+async function handleMaxUpdate(env, u) {
+  if (env.SUBS) await env.SUBS.put("max:last", JSON.stringify(u), { expirationTtl: 86400 }).catch(() => {});
+  const type = u.update_type;
+  const text = (u.message?.body?.text || u.message?.text || "").trim();
+  const chatId = maxChatId(u);
+  if (type === "bot_started" || /^\/(start|dkp)\b/i.test(text)) {
+    await maxSend(env, chatId,
+      "🚗 Оформление договора купли-продажи ТС\n\nОткройте приложение, загрузите фото паспорта и СТС — и бот пришлёт готовый договор (DOCX + PDF).",
+      [{ type: "inline_keyboard", payload: { buttons: [[{ type: "link", text: "📝 Оформить ДКП", url: env.MINI_APP_URL }]] } }]);
+  }
+}
+
 /* ---------- Router ---------- */
 export default {
   async fetch(request, env) {
@@ -747,6 +781,30 @@ export default {
       const r = await tg(env, "setWebhook", { url: hook });
       const out = await r.json().catch(() => ({}));
       return json({ setWebhook: hook, telegram: out });
+    }
+
+    // MAX: проверка токена/базы (вернёт инфо о боте или ошибку)
+    if (url.pathname === "/max/me") {
+      const r = await maxApi(env, "GET", "/me");
+      return new Response(await r.text(), { status: r.status, headers: { "content-type": "application/json; charset=utf-8" } });
+    }
+    // MAX: регистрация вебхука (открыть один раз после установки MAX_TOKEN)
+    if (url.pathname === "/max/setup") {
+      if (!env.MAX_TOKEN) return new Response("Сначала задайте секрет MAX_TOKEN.", { status: 400 });
+      const hook = `${url.origin}/max/webhook`;
+      const r = await maxApi(env, "POST", "/subscriptions", { url: hook, update_types: ["message_created", "bot_started", "message_callback"] });
+      return json({ subscribe: hook, status: r.status, response: (await r.text()).slice(0, 800) });
+    }
+    // MAX: webhook
+    if (url.pathname === "/max/webhook" && request.method === "POST") {
+      const u = await request.json().catch(() => null);
+      if (u) await handleMaxUpdate(env, u);
+      return new Response("ok");
+    }
+    // MAX: последний полученный апдейт (для отладки формата)
+    if (url.pathname === "/max/last") {
+      const v = env.SUBS ? await env.SUBS.get("max:last") : null;
+      return new Response(v || "{}", { headers: { "content-type": "application/json; charset=utf-8" } });
     }
 
     // Telegram webhook

@@ -24,6 +24,9 @@ CP_PUBLIC_ID = ""          # CloudPayments отключён (перешли на
 # Тарифы (₽). Можно не задавать — действуют значения по умолчанию из worker.js.
 PRICE_ONE = "99"           # один договор (разовый доступ)
 ADMIN_IDS = "169920903"    # Telegram ID админов через запятую — доступ без оплаты (узнать: /id в боте)
+# --- MAX мессенджер (порт бота) ---
+MAX_API_BASE = "https://botapi.max.ru"   # базовый URL Bot API MAX (поправить, если другой)
+# Секрет MAX_TOKEN — токен MAX-бота, задаётся в дашборде Cloudflare (Variables and Secrets → Secret).
 PRICE_1M  = "500"          # подписка 1 месяц
 PRICE_3M  = "1200"         # подписка 3 месяца
 PRICE_6M  = "2000"         # подписка полгода
