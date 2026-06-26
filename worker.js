@@ -210,6 +210,35 @@ async function yandexGptAddress(env, fullText) {
   } catch { return ""; }
 }
 
+// Узкий экстрактор органа, выдавшего паспорт (дословно, без выдумок).
+async function yandexGptIssuer(env, fullText) {
+  try {
+    const r = await fetch("https://llm.api.cloud.yandex.net/foundationModels/v1/completion", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: "Api-Key " + env.YANDEX_API_KEY },
+      body: JSON.stringify({
+        modelUri: `gpt://${env.YANDEX_FOLDER_ID}/yandexgpt/latest`,
+        completionOptions: { temperature: 0, maxTokens: 200 },
+        messages: [
+          { role: "system", text:
+            "На входе — распознанный текст страницы паспорта РФ. Извлеки орган, выдавший паспорт " +
+            "(заголовок сверху и/или строка у надписи «Паспорт выдан»), например: " +
+            "«ГУ МВД РОССИИ ПО Г. МОСКВЕ», «ОТДЕЛОМ УФМС РОССИИ ПО ТВЕРСКОЙ ОБЛ. В ВЫШНЕВОЛОЦКОМ Р-НЕ». " +
+            "Верни ДОСЛОВНО как в тексте, ЗАГЛАВНЫМИ буквами. НИЧЕГО не добавляй и не выдумывай: " +
+            "если района/города нет в тексте — не дописывай их. Верни СТРОГО JSON {\"issuer\":\"...\"}. " +
+            "Если органа в тексте нет — {\"issuer\":\"\"}." },
+          { role: "user", text: (fullText || "").slice(0, 4000) },
+        ],
+      }),
+    });
+    if (!r.ok) return "";
+    const out = await r.json();
+    const text = out.result?.alternatives?.[0]?.message?.text || "";
+    const obj = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    return typeof obj.issuer === "string" ? obj.issuer.trim() : "";
+  } catch { return ""; }
+}
+
 async function recognizeYandex(env, mediaType, data, kind) {
   const res = await yandexOcr(env, mediaType, data, YA_MODEL[kind] || "page");
   if (res.error) return res;
@@ -235,6 +264,11 @@ async function recognizeYandex(env, mediaType, data, kind) {
     // Марку и серию/номер СТС GPT не доверяем (нормализует/путает) — берём из документа.
     const skip = { car_brand: 1, sts_series: 1, sts_number: 1, pasp_issued_by: 1 };
     if (gpt) for (const k in gpt) { if (skip[k]) continue; if (gpt[k] && !fields[k]) fields[k] = gpt[k]; }
+  }
+  // Паспорт: «кем выдан» — узкий GPT-экстрактор (дословно как в документе); регэксп mapPassport остаётся запасным.
+  if (kind === "passport" && env.YANDEX_FOLDER_ID && fullText) {
+    const iss = await yandexGptIssuer(env, fullText);
+    if (iss) fields.pasp_issued_by = iss;
   }
   // Марка/модель: спецмодель СТС нормализует (напр. «3er») — предпочитаем литеральный текст документа.
   if (kind === "sts" || kind === "sts_back" || kind === "pts") {
