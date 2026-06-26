@@ -144,11 +144,20 @@
   </div>
   <div style="flex:1;overflow:auto;padding:14px">
     <p class="hint" id="paywall-status" style="margin:0 0 12px">Проверяем доступ…</p>
+    <button id="statsBtn" class="btn sec" onclick="showStats()" style="display:none;width:100%;margin-bottom:12px">📊 Статистика</button>
     <div id="tariffs"></div>
     <p class="hint" style="margin-top:14px">Оплата проходит через защищённый платёжный сервис.
        Доступ открывается автоматически после оплаты.</p>
     <p class="hint" style="margin-top:10px">Продавец: ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</p>
   </div>
+</div>
+
+<div id="stats" style="display:none;position:fixed;inset:0;z-index:70;background:var(--bg);flex-direction:column">
+  <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
+    <b style="flex:1;font-size:16px">📊 Статистика</b>
+    <button class="btn sec" onclick="closeStats()">Закрыть</button>
+  </div>
+  <div id="statsBody" style="flex:1;overflow:auto;padding:14px"></div>
 </div>
 
 <div id="preview" style="display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column">
@@ -226,10 +235,39 @@ function openPaywall() {
   const cb = document.getElementById("paywall-close");
   cb.textContent = hasAccess ? "Продолжить →" : "Закрыть";
   cb.style.display = "";
+  document.getElementById("statsBtn").style.display = subInfo.admin ? "block" : "none";
   renderTariffs();
   document.getElementById("paywall").style.display = "flex";
 }
 function closePaywall() { document.getElementById("paywall").style.display = "none"; }
+
+// Статистика в мини-аппе (только админ).
+async function showStats() {
+  const body = document.getElementById("statsBody");
+  body.innerHTML = '<p class="hint">Загрузка…</p>';
+  document.getElementById("stats").style.display = "flex";
+  try {
+    const r = await fetch(WORKER + "/api/stats", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData }),
+    });
+    const s = await r.json();
+    if (s.error) { body.innerHTML = '<p class="hint">Нет доступа или ошибка: ' + s.error + '</p>'; return; }
+    const title = { one: "Разовый", m1: "1 месяц", m3: "3 месяца", m6: "Полгода" };
+    const rub = (n) => Number(n || 0).toLocaleString("ru-RU");
+    const row = (label, val) => `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><span style="color:var(--hint)">${label}</span><b>${val}</b></div>`;
+    const plans = Object.keys(s.byPlan || {}).map((p) =>
+      `<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--hint)">${title[p] || p}</span><span>${s.byPlan[p]}</span></div>`).join("") || '<p class="hint">—</p>';
+    body.innerHTML =
+      row("Активных подписок", s.activeSubs) +
+      row("Разовых договоров в остатке", s.creditsLeft + " (у " + s.creditUsers + " польз.)") +
+      row("Платежей всего", s.payCount) +
+      row("Выручка всего", rub(s.revenue) + " ₽") +
+      row("За 30 дней", s.cnt30 + " платежей · " + rub(s.rev30) + " ₽") +
+      '<p class="hint" style="margin:14px 0 4px">По тарифам (число платежей):</p>' + plans;
+  } catch (e) { body.innerHTML = '<p class="hint">Ошибка загрузки статистики.</p>'; }
+}
+function closeStats() { document.getElementById("stats").style.display = "none"; }
 
 // Оплата через Тинькофф: создаём платёж и открываем оплату В ТОМ ЖЕ ОКНЕ.
 // Перед уходом сохраняем форму и initData; Тинькофф вернёт обратно (?dkp=paid) — восстановим.
