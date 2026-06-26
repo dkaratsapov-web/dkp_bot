@@ -233,7 +233,7 @@ async function recognizeYandex(env, mediaType, data, kind) {
   } else if (fullText && env.YANDEX_FOLDER_ID) {
     const gpt = await yandexGptExtract(env, fullText);
     // Марку и серию/номер СТС GPT не доверяем (нормализует/путает) — берём из документа.
-    const skip = { car_brand: 1, sts_series: 1, sts_number: 1 };
+    const skip = { car_brand: 1, sts_series: 1, sts_number: 1, pasp_issued_by: 1 };
     if (gpt) for (const k in gpt) { if (skip[k]) continue; if (gpt[k] && !fields[k]) fields[k] = gpt[k]; }
   }
   // Марка/модель: спецмодель СТС нормализует (напр. «3er») — предпочитаем литеральный текст документа.
@@ -291,18 +291,18 @@ function mapPassport(entities, fullText) {
     const c = fullText.match(/\b(\d{3})\s*-\s*(\d{3})\b/);
     if (c) f.pasp_code = c[1] + "-" + c[2];
   }
-  // «Кем выдан»: модель паспорта это поле не возвращает — достаём из текста
-  // (page-OCR). Сначала «выдан … <дата>», иначе по ключевым словам органа.
+  // «Кем выдан»: достаём орган КАК НАПЕЧАТАНО (обычно заглавными), ограничивая
+  // до меток «Паспорт выдан / Дата выдачи / Код». GPT для этого поля не используем.
   if (!f.pasp_issued_by && fullText) {
     const t = fullText.replace(/\s+/g, " ");
     let by = "";
-    const m1 = t.match(/выдан[аоы]?\.?\s+(.{6,90}?)\s*\d{2}[.\-]\d{2}[.\-]\d{4}/i);
-    if (m1) by = m1[1];
+    const m2 = t.match(/((?:ГУ|ГУВД|УВД|ОВД|ОУ|ТП|МП|ОТДЕЛ\w*|ОТДЕЛЕНИ\w*|УПРАВЛЕНИ\w*)?\.?\s?(?:МВД|УФМС|ФМС|МИЛИЦИИ|ПОЛИЦИИ)\s+РОССИ[ЙИ][^0-9]{0,100}?(?:Г\.?\s?[А-ЯЁ][А-ЯЁа-яё.\- ]*?|ОБЛ\w*|КРА\w*|РЕСПУБЛИК\w*)(?:\s+ПО\s+РАЙОНУ\s+[А-ЯЁ][А-ЯЁа-яё.\- ]*?)?)(?=\s*(?:паспорт|дата|код|\d{2}[.\-]\d{2}[.\-]\d{4})|$)/i);
+    if (m2) by = m2[1];
     if (!by) {
-      const m2 = t.match(/(?:ГУ\s?|У|О|ОУ|ТП\s?)?(?:МВД|УФМС|ФМС|ОВД|МИЛИЦИИ|ПОЛИЦИИ)[^|]{0,80}?(?:ОБЛ\w*|КРА\w*|РАЙОН\w*|ГОРОД\w*|Г\.?\s?[А-ЯЁ][а-яё]+|РЕСПУБЛИК\w*|АО\b)/i);
-      if (m2) by = m2[0];
+      const m1 = t.match(/паспорт\s+выдан[\s:.]+([А-ЯЁ][^0-9]{6,90}?)\s*(?:дата|код|\d{2}[.\-]\d{2}[.\-]\d{4})/i);
+      if (m1) by = m1[1];
     }
-    if (by) f.pasp_issued_by = by.replace(/^[\s.,№-]+|[\s.,]+$/g, "");
+    if (by) f.pasp_issued_by = by.replace(/^[\s.,№-]+|[\s.,]+$/g, "").replace(/\s+/g, " ");
   }
   return f;
 }
