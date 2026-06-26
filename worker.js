@@ -490,9 +490,29 @@ function payProvider(env) {
   return "";
 }
 function subEnabled(env) { return !!(env.SUBS && payProvider(env)); }
-// Админы (через запятую в ADMIN_IDS) — доступ без оплаты.
-function isAdmin(env, userId) {
-  return String(env.ADMIN_IDS || "").split(",").map((s) => s.trim()).filter(Boolean).includes(String(userId));
+// Статичные админы из ADMIN_IDS (через запятую).
+function staticAdmins(env) {
+  return String(env.ADMIN_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+// Админ = в ADMIN_IDS (env) ИЛИ добавлен динамически в KV (admin:<id>).
+async function isAdmin(env, userId) {
+  const id = String(userId);
+  if (staticAdmins(env).includes(id)) return true;
+  if (env.SUBS && (await env.SUBS.get("admin:" + id))) return true;
+  return false;
+}
+// Список всех админов: статичные (из env) + динамические (KV).
+async function listAdmins(env) {
+  let dynamic = [];
+  if (env.SUBS) dynamic = (await kvListAll(env, "admin:")).map((k) => k.name.slice(6));
+  return { static: staticAdmins(env), dynamic };
+}
+// Последние платежи (из tpay:* метаданных).
+async function recentPayments(env, n) {
+  if (!env.SUBS) return [];
+  const keys = await kvListAll(env, "tpay:");
+  return keys.map((k) => ({ ...(k.metadata || {}), id: k.name.slice(5) }))
+    .sort((a, b) => Number(b.t || 0) - Number(a.t || 0)).slice(0, n || 20);
 }
 function num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; }
 
@@ -700,13 +720,13 @@ async function handleUpdate(env, update) {
   if (text === "/id" || text === "/myid") {
     await tg(env, "sendMessage", {
       chat_id: chatId,
-      text: "Ваш Telegram ID: " + chatId + (isAdmin(env, chatId) ? "\n✅ Вы админ — оформление без оплаты." : ""),
+      text: "Ваш Telegram ID: " + chatId + ((await isAdmin(env, chatId)) ? "\n✅ Вы админ — оформление без оплаты." : ""),
     });
     return;
   }
 
   if (text === "/stats" || text === "/admin") {
-    if (!isAdmin(env, chatId)) {
+    if (!(await isAdmin(env, chatId))) {
       await tg(env, "sendMessage", { chat_id: chatId, text: "Команда доступна только администратору." });
       return;
     }
@@ -837,7 +857,7 @@ export default {
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       if (!subEnabled(env)) return json({ enabled: false, active: true });
-      if (isAdmin(env, auth.user.id)) return json({ enabled: true, active: true, admin: true });
+      if (await isAdmin(env, auth.user.id)) return json({ enabled: true, active: true, admin: true });
       const until = await subUntil(env, auth.user.id);
       const cr = await credits(env, auth.user.id);
       // active — есть ли доступ (подписка ИЛИ хотя бы один кредит).
@@ -849,8 +869,46 @@ export default {
       const b = await request.json().catch(() => ({}));
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
-      if (!isAdmin(env, auth.user.id)) return json({ error: "forbidden" }, 403);
+      if (!(await isAdmin(env, auth.user.id))) return json({ error: "forbidden" }, 403);
       return json(await computeStatsData(env));
+    }
+
+    // Админ-панель: единый эндпоинт (действия по полю action)
+    if (url.pathname === "/api/admin" && request.method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
+      if (!auth.ok) return json({ error: "unauthorized" }, 401);
+      if (!(await isAdmin(env, auth.user.id))) return json({ error: "forbidden" }, 403);
+      const uid = String(b.userId || "").trim();
+      switch (b.action) {
+        case "stats": return json(await computeStatsData(env));
+        case "payments": return json({ payments: await recentPayments(env, 20) });
+        case "admins": return json(await listAdmins(env));
+        case "admin_add":
+          if (!/^\d+$/.test(uid)) return json({ error: "bad_id" }, 400);
+          if (env.SUBS) await env.SUBS.put("admin:" + uid, "1");
+          return json(await listAdmins(env));
+        case "admin_remove":
+          if (env.SUBS) await env.SUBS.delete("admin:" + uid);
+          return json(await listAdmins(env));
+        case "user": {
+          if (!/^\d+$/.test(uid)) return json({ error: "bad_id" }, 400);
+          const until = await subUntil(env, uid);
+          return json({ userId: uid, until: until > Date.now() ? until : 0, credits: await credits(env, uid), admin: await isAdmin(env, uid) });
+        }
+        case "grant": {
+          if (!/^\d+$/.test(uid)) return json({ error: "bad_id" }, 400);
+          const t = findTariff(env, b.plan);
+          if (!t) return json({ error: "bad_plan" }, 400);
+          if (t.days) { const u2 = await grantSub(env, uid, t.days); return json({ ok: true, until: u2 }); }
+          const n = await addCredits(env, uid, t.credits || 1);
+          return json({ ok: true, credits: n });
+        }
+        case "reset":
+          if (env.SUBS) { await env.SUBS.delete("credits:" + uid); await env.SUBS.delete("sub:" + uid); }
+          return json({ ok: true });
+        default: return json({ error: "bad_action" }, 400);
+      }
     }
 
     // Создать платёж Тинькофф → вернуть ссылку на оплату
@@ -879,7 +937,7 @@ export default {
         const t = findTariff(env, planKey, amount);
         if (t) {
           await env.SUBS.put(payKey, "1",
-            { expirationTtl: 60 * 60 * 24 * 400, metadata: { a: amount, p: t.key, t: Date.now(), k: t.days ? "sub" : "credit" } });
+            { expirationTtl: 60 * 60 * 24 * 400, metadata: { a: amount, p: t.key, t: Date.now(), k: t.days ? "sub" : "credit", u: String(userId) } });
           if (t.days) {
             await grantSub(env, userId, t.days);
             await tg(env, "sendMessage", { chat_id: userId, text: `✅ Оплата получена. Подписка «${t.title}» активна — можно оформлять договоры. /start` }).catch(() => {});
@@ -934,7 +992,7 @@ export default {
       // Платный режим: нужен активный доступ — подписка ИЛИ разовый кредит (списывается).
       // Админ — без оплаты.
       let usedCredit = false, remainingCredits = null, subUntilMs = 0;
-      if (subEnabled(env) && !isAdmin(env, auth.user.id)) {
+      if (subEnabled(env) && !(await isAdmin(env, auth.user.id))) {
         const until = await subUntil(env, auth.user.id);
         if (until > Date.now()) { subUntilMs = until; }                   // активная подписка — кредит не тратим
         else {
