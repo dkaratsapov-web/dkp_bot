@@ -580,7 +580,10 @@ async function handleUpdate(env, update) {
         "💳 *Тарифы:* 1 договор — 99 ₽, месяц — 500 ₽, 3 месяца — 1200 ₽, полгода — 2000 ₽.",
       parse_mode: "Markdown",
       reply_markup: {
-        inline_keyboard: [[{ text: "📝 Оформить ДКП", web_app: { url } }]],
+        inline_keyboard: [
+          [{ text: "📝 Оформить ДКП", web_app: { url } }],
+          [{ text: "🚘 Узнать про подбор автомобиля", url: "https://t.me/AvtoPodbor251" }],
+        ],
       },
     });
     return;
