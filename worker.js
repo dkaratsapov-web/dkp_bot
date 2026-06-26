@@ -333,7 +333,13 @@ function fillFromText(f, t) {
   if (!f.car_volume) f.car_volume = grab(/(?:рабочий\s*)?об[ъь][её]м[^0-9]{0,16}(\d{3,5})/i);
   if (!f.car_engine) { const e = grab(/(?:модел[ьи][^.]{0,4})?двигател[ья][\s№:no.,]{0,10}([A-ZА-Я0-9][A-ZА-Я0-9 \-/]{3,24})/i); if (/\d{2,}/.test(e)) f.car_engine = e.trim(); }
   if (!f.car_body) { const b = grab(/кузов.{0,40}?(ОТСУТСТВУЕТ|[A-ZА-Я0-9]{6,22})/i); if (/\d{4,}/.test(b) || /ОТСУТ/i.test(b)) f.car_body = b.toUpperCase(); }
-  if (!f.car_chassis) { const ch = grab(/(?:шасси|рама).{0,30}?(ОТСУТСТВУЕТ|[A-ZА-Я0-9]{6,22})/i); if (ch) f.car_chassis = ch.toUpperCase(); }
+  if (!f.car_chassis) { const ch = grab(/(?:шасси|рама)[^A-ZА-Я0-9]{0,30}(ОТСУТСТВ\w*|НЕ\s*УСТАНОВЛ\w*|[A-ZА-Я0-9]{5,22})/i); if (ch) f.car_chassis = ch.toUpperCase(); }
+  if (!f.car_plate) {
+    // Госномер: по метке «рег. знак / гос. номер» или по формату РФ (буквы АВЕКМНОРСТУХ + цифры).
+    let pl = grab(/(?:регистрационн\w*\s*знак|гос\.?\s*(?:рег\w*\s*)?номер)[\s:№]*([A-ZА-Я]\s?\d{3}\s?[A-ZА-Я]{2}\s?\d{2,3})/i)
+      || (T.match(/\b([АВЕКМНОРСТУХABEKMHOPCTYX]\s?\d{3}\s?[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\s?\d{2,3})\b/) || [])[1] || "";
+    if (pl) f.car_plate = pl.replace(/\s+/g, "").toUpperCase();
+  }
   if (!f.pts_issued) {
     // п.23 «Наименование организации, выдавшей паспорт» + п.25 «Дата выдачи паспорта».
     const iss = grab(/выдавш[а-яё]+\s+паспорт[\s:№.]*([А-ЯЁA-Z][^0-9]{4,80}?)(?=\s*(?:\d|адрес)|$)/i)
