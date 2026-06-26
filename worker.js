@@ -558,9 +558,9 @@ async function kvListAll(env, prefix) {
   } while (cursor);
   return keys;
 }
-// Статистика для админа: подписки, кредиты, платежи, выручка.
-async function computeStats(env) {
-  if (!env.SUBS) return "Статистика недоступна (KV не подключён).";
+// Статистика для админа (структурные данные): подписки, кредиты, платежи, выручка.
+async function computeStatsData(env) {
+  if (!env.SUBS) return { error: "no_kv" };
   const now = Date.now();
   const [subKeys, credKeys, payKeys] = await Promise.all([
     kvListAll(env, "sub:"), kvListAll(env, "credits:"), kvListAll(env, "tpay:"),
@@ -583,18 +583,24 @@ async function computeStats(env) {
     byPlan[m.p || "?"] = (byPlan[m.p || "?"] || 0) + 1;
     if (Number(m.t || 0) >= monthAgo) { rev30 += a; cnt30++; }
   }
+  return { activeSubs, creditsLeft, creditUsers, payCount: payKeys.length, revenue, rev30, cnt30, byPlan };
+}
+// Текстовая статистика (для команды /stats в чате).
+async function computeStats(env) {
+  const s = await computeStatsData(env);
+  if (s.error) return "Статистика недоступна (KV не подключён).";
   const title = { one: "Разовый", m1: "1 месяц", m3: "3 месяца", m6: "Полгода" };
-  const planLines = Object.keys(byPlan).map((p) => `   • ${title[p] || p}: ${byPlan[p]}`).join("\n") || "   —";
+  const planLines = Object.keys(s.byPlan).map((p) => `   • ${title[p] || p}: ${s.byPlan[p]}`).join("\n") || "   —";
   const rub = (n) => Number(n).toLocaleString("ru-RU");
   return [
     "📊 *Статистика «Безопасный АвтоДоговор»*",
     "",
-    `👥 Активных подписок: *${activeSubs}*`,
-    `🎫 Разовых договоров в остатке: *${creditsLeft}* (у ${creditUsers} польз.)`,
+    `👥 Активных подписок: *${s.activeSubs}*`,
+    `🎫 Разовых договоров в остатке: *${s.creditsLeft}* (у ${s.creditUsers} польз.)`,
     "",
-    `💳 Платежей всего: *${payKeys.length}*`,
-    `💰 Выручка всего: *${rub(revenue)} ₽*`,
-    `📅 За 30 дней: ${cnt30} платежей, *${rub(rev30)} ₽*`,
+    `💳 Платежей всего: *${s.payCount}*`,
+    `💰 Выручка всего: *${rub(s.revenue)} ₽*`,
+    `📅 За 30 дней: ${s.cnt30} платежей, *${rub(s.rev30)} ₽*`,
     "",
     "*По тарифам (число платежей):*",
     planLines,
@@ -778,6 +784,15 @@ export default {
       const cr = await credits(env, auth.user.id);
       // active — есть ли доступ (подписка ИЛИ хотя бы один кредит).
       return json({ enabled: true, active: until > Date.now() || cr > 0, sub: until > Date.now(), until, credits: cr });
+    }
+
+    // Статистика для мини-аппа (только админ)
+    if (url.pathname === "/api/stats" && request.method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
+      if (!auth.ok) return json({ error: "unauthorized" }, 401);
+      if (!isAdmin(env, auth.user.id)) return json({ error: "forbidden" }, 403);
+      return json(await computeStatsData(env));
     }
 
     // Создать платёж Тинькофф → вернуть ссылку на оплату
