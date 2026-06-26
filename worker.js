@@ -544,8 +544,61 @@ async function grantSub(env, userId, days) {
   const cur = await subUntil(env, userId);
   const until = (cur > Date.now() ? cur : Date.now()) + ms;
   await env.SUBS.put("sub:" + userId, String(until),
-    { expirationTtl: Math.ceil((until - Date.now()) / 1000) + 86400 });
+    { expirationTtl: Math.ceil((until - Date.now()) / 1000) + 86400, metadata: { until } });
   return until;
+}
+
+// Все ключи KV по префиксу (с пагинацией).
+async function kvListAll(env, prefix) {
+  let keys = [], cursor;
+  do {
+    const r = await env.SUBS.list({ prefix, cursor, limit: 1000 });
+    keys = keys.concat(r.keys);
+    cursor = r.list_complete ? null : r.cursor;
+  } while (cursor);
+  return keys;
+}
+// Статистика для админа: подписки, кредиты, платежи, выручка.
+async function computeStats(env) {
+  if (!env.SUBS) return "Статистика недоступна (KV не подключён).";
+  const now = Date.now();
+  const [subKeys, credKeys, payKeys] = await Promise.all([
+    kvListAll(env, "sub:"), kvListAll(env, "credits:"), kvListAll(env, "tpay:"),
+  ]);
+  let activeSubs = 0;
+  for (const k of subKeys) {
+    const u = (k.metadata && k.metadata.until) || Number(await env.SUBS.get(k.name)) || 0;
+    if (u > now) activeSubs++;
+  }
+  let creditUsers = 0, creditsLeft = 0;
+  for (const k of credKeys) {
+    const n = k.metadata && k.metadata.n != null ? Number(k.metadata.n) : (Number(await env.SUBS.get(k.name)) || 0);
+    if (n > 0) { creditUsers++; creditsLeft += n; }
+  }
+  let revenue = 0, rev30 = 0, cnt30 = 0; const byPlan = {};
+  const monthAgo = now - 30 * 86400000;
+  for (const k of payKeys) {
+    const m = k.metadata || {};
+    const a = Number(m.a || 0); revenue += a;
+    byPlan[m.p || "?"] = (byPlan[m.p || "?"] || 0) + 1;
+    if (Number(m.t || 0) >= monthAgo) { rev30 += a; cnt30++; }
+  }
+  const title = { one: "Разовый", m1: "1 месяц", m3: "3 месяца", m6: "Полгода" };
+  const planLines = Object.keys(byPlan).map((p) => `   • ${title[p] || p}: ${byPlan[p]}`).join("\n") || "   —";
+  const rub = (n) => Number(n).toLocaleString("ru-RU");
+  return [
+    "📊 *Статистика «Безопасный АвтоДоговор»*",
+    "",
+    `👥 Активных подписок: *${activeSubs}*`,
+    `🎫 Разовых договоров в остатке: *${creditsLeft}* (у ${creditUsers} польз.)`,
+    "",
+    `💳 Платежей всего: *${payKeys.length}*`,
+    `💰 Выручка всего: *${rub(revenue)} ₽*`,
+    `📅 За 30 дней: ${cnt30} платежей, *${rub(rev30)} ₽*`,
+    "",
+    "*По тарифам (число платежей):*",
+    planLines,
+  ].join("\n");
 }
 // Проверка подписи уведомления CloudPayments: base64(HMAC-SHA256(rawBody, ApiSecret)).
 async function cpVerify(env, rawBody, hmacHeader) {
@@ -643,6 +696,15 @@ async function handleUpdate(env, update) {
       chat_id: chatId,
       text: "Ваш Telegram ID: " + chatId + (isAdmin(env, chatId) ? "\n✅ Вы админ — оформление без оплаты." : ""),
     });
+    return;
+  }
+
+  if (text === "/stats" || text === "/admin") {
+    if (!isAdmin(env, chatId)) {
+      await tg(env, "sendMessage", { chat_id: chatId, text: "Команда доступна только администратору." });
+      return;
+    }
+    await tg(env, "sendMessage", { chat_id: chatId, text: await computeStats(env), parse_mode: "Markdown" });
     return;
   }
 
