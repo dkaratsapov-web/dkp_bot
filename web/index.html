@@ -186,7 +186,7 @@ async function loadSub() {
       body: JSON.stringify({ initData: initData }),
     })).json();
     subIsActive = !!s.active;
-    subInfo = { sub: !!s.sub, credits: s.credits || 0, until: s.until || 0 };
+    subInfo = { sub: !!s.sub, credits: s.credits || 0, until: s.until || 0, admin: !!s.admin };
   } catch { subIsActive = true; }
 }
 // Первый экран — всегда окно доступа; обрабатываем возврат с оплаты (?dkp=paid/fail).
@@ -217,7 +217,8 @@ function renderTariffs() {
 function openPaywall() {
   const hasAccess = subIsActive;            // активная подписка ИЛИ есть кредит
   let st;
-  if (subInfo.sub && subInfo.until) st = "✅ Подписка активна до " + new Date(subInfo.until).toLocaleDateString("ru-RU") + ". Можно продлить или продолжить оформление.";
+  if (subInfo.admin) st = "✅ Админ-доступ — оформление без оплаты.";
+  else if (subInfo.sub && subInfo.until) st = "✅ Подписка активна до " + new Date(subInfo.until).toLocaleDateString("ru-RU") + ". Можно продлить или продолжить оформление.";
   else if (subInfo.credits > 0) st = "✅ Доступно договоров: " + subInfo.credits + ". Можно докупить или продолжить оформление.";
   else st = "Чтобы получить готовый договор, выберите тариф:";
   document.getElementById("paywall-status").textContent = st;
