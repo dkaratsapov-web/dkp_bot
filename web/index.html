@@ -46,6 +46,8 @@
   .doc-opt + .doc-opt { border-top: 1px solid var(--line); }
   .doc-opt input { width: 18px; height: 18px; flex: none; accent-color: var(--brand); }
   .doc-opt .tag { font-size: 11px; color: var(--hint); }
+  .doc-extra { display: none; padding: 6px 0 10px 8px; margin: 0 0 4px 6px; border-left: 2px solid var(--brand-d); }
+  .doc-extra.on { display: block; }
   /* Тарифы (виды оплаты) */
   .tariff { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer;
             border: 1.5px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg);
@@ -149,6 +151,50 @@
   <label class="doc-opt"><input type="checkbox" id="doc_dkp" checked disabled /> <span>Договор купли-продажи <span class="tag">(DOCX + PDF, обязательно)</span></span></label>
   <label class="doc-opt"><input type="checkbox" id="doc_act" /> <span>Акт приёма-передачи ТС <span class="tag">(PDF)</span></span></label>
   <label class="doc-opt"><input type="checkbox" id="doc_raspiska" /> <span>Расписка о получении денег <span class="tag">(PDF)</span></span></label>
+
+  <label class="doc-opt"><input type="checkbox" id="doc_gibdd" onchange="toggleDoc('gibdd')" /> <span>Заявление в ГИБДД <span class="tag">(PDF)</span></span></label>
+  <div class="doc-extra" id="extra_gibdd">
+    <label>Вид действия</label>
+    <select id="gibdd_action">
+      <option value="reg">Постановка на учёт (заявитель — Покупатель)</option>
+      <option value="stop">Прекращение учёта (заявитель — Продавец)</option>
+    </select>
+    <label>Подразделение ГИБДД (необязательно)</label>
+    <input id="gibdd_dept" placeholder="напр. МРЭО ГИБДД по г. Твери" />
+  </div>
+
+  <label class="doc-opt"><input type="checkbox" id="doc_spouse" onchange="toggleDoc('spouse')" /> <span>Согласие супруга на продажу <span class="tag">(PDF)</span></span></label>
+  <div class="doc-extra" id="extra_spouse">
+    <p class="hint" style="margin:0 0 4px">Данные супруга(и) Продавца, дающего согласие.</p>
+    <label>ФИО супруга(и)</label><input id="sp_fio" placeholder="Иванова Мария Петровна" />
+    <div class="row">
+      <div><label>Дата рождения</label><input id="sp_birth" placeholder="01.01.1985" /></div>
+      <div><label>Серия и номер паспорта</label><input id="sp_pasp" placeholder="2810 123456" /></div>
+    </div>
+    <label>Кем выдан</label><input id="sp_by" placeholder="ОУФМС России по…" />
+    <div class="row">
+      <div><label>Дата выдачи</label><input id="sp_date" placeholder="15.02.2010" /></div>
+      <div><label>Код подразделения</label><input id="sp_code" placeholder="690-001" /></div>
+    </div>
+    <label>Адрес регистрации</label><input id="sp_addr" placeholder="г. Тверь, ул. …" />
+  </div>
+
+  <label class="doc-opt"><input type="checkbox" id="doc_dov" onchange="toggleDoc('dov')" /> <span>Доверенность на постановку на учёт <span class="tag">(PDF)</span></span></label>
+  <div class="doc-extra" id="extra_dov">
+    <p class="hint" style="margin:0 0 4px">Доверитель — Покупатель (новый собственник). Укажите поверенного.</p>
+    <label>ФИО поверенного</label><input id="dov_fio" placeholder="Сидоров Иван Алексеевич" />
+    <div class="row">
+      <div><label>Дата рождения</label><input id="dov_birth" placeholder="01.01.1990" /></div>
+      <div><label>Серия и номер паспорта</label><input id="dov_pasp" placeholder="2810 123456" /></div>
+    </div>
+    <label>Кем выдан</label><input id="dov_by" placeholder="ОУФМС России по…" />
+    <div class="row">
+      <div><label>Дата выдачи</label><input id="dov_date" placeholder="15.02.2010" /></div>
+      <div><label>Код подразделения</label><input id="dov_code" placeholder="690-001" /></div>
+    </div>
+    <label>Адрес регистрации</label><input id="dov_addr" placeholder="г. Тверь, ул. …" />
+    <label>Срок доверенности</label><input id="dov_term" placeholder="один год" value="один год" />
+  </div>
 </div>
 
 <div class="legal">ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</div>
@@ -209,6 +255,13 @@ function goBack() {
   if (open("paywall")) return closePaywall();
   if (tg?.close) tg.close(); else history.back();
 }
+
+// Раскрытие доп. полей документа при отметке галочки.
+function toggleDoc(key) {
+  const cb = document.getElementById("doc_" + key), ex = document.getElementById("extra_" + key);
+  if (ex) ex.classList.toggle("on", !!cb?.checked);
+}
+function syncDocToggles() { ["gibdd", "spouse", "dov"].forEach(toggleDoc); }
 
 /* ---------- Доступ и оплата (Tinkoff) ---------- */
 let subCfg = { subEnabled: false, provider: "", cpPublicId: "", tariffs: [] };
@@ -402,6 +455,7 @@ function restoreForm() {
     document.querySelectorAll("input, select").forEach((el) => {
       if (el.id && el.id in d) { if (el.type === "checkbox") el.checked = d[el.id]; else el.value = d[el.id]; }
     });
+    syncDocToggles();
     sessionStorage.removeItem("dkp_form");
   } catch (e) {}
 }
@@ -836,6 +890,93 @@ function makeRaspiskaPdf(data) {
   ] });
 }
 
+/* ---------- Доп. документы: заявление ГИБДД, согласие супруга, доверенность ---------- */
+// Доп. поля пакета (читаются из формы при формировании).
+function collectExtraDocs(data) {
+  data.gibdd_action = document.getElementById("gibdd_action")?.value || "reg";
+  data.gibdd_dept = val("gibdd_dept");
+  data.sp = { fio: val("sp_fio"), birth: val("sp_birth"), pasp: val("sp_pasp"), by: val("sp_by"), date: val("sp_date"), code: val("sp_code"), addr: val("sp_addr") };
+  data.dov = { fio: val("dov_fio"), birth: val("dov_birth"), pasp: val("dov_pasp"), by: val("dov_by"), date: val("dov_date"), code: val("dov_code"), addr: val("dov_addr"), term: val("dov_term") || "один год" };
+}
+// Описание человека из явных полей (для супруга/поверенного).
+function spLine(p) {
+  return `${p.fio || "—"}${p.birth ? `, ${p.birth} г.р.` : ""}, паспорт ${p.pasp || "—"}, выдан ${p.by || "—"} ${p.date || ""}${p.code ? `, код ${p.code}` : ""}, зарегистрирован(а) по адресу: ${p.addr || "—"}`;
+}
+// Краткое описание ТС (одной строкой) для заявлений/доверенностей.
+function carBrief(data) {
+  return `${data.car_brand || "—"}, ${data.car_year || "—"} г.в., VIN ${data.car_vin || "—"}, ПТС серия ${data.pts_series || "—"} № ${data.pts_number || "—"}, госномер ${data.car_plate || "—"}`;
+}
+
+function makeGibddPdf(data) {
+  const reg = data.gibdd_action !== "stop";
+  const applicant = reg ? personDesc(data, "buyer") : personDesc(data, "seller");
+  const short = reg ? data.buyer_short : data.seller_short;
+  return pdfBuffer({ content: [
+    { text: "В " + (data.gibdd_dept || "_____________________________"), alignment: "right", margin: [0, 0, 0, 2] },
+    { text: "от " + applicant, alignment: "right", margin: [0, 0, 0, 12] },
+    { text: "ЗАЯВЛЕНИЕ", bold: true, fontSize: 13, alignment: "center", margin: [0, 0, 0, 8] },
+    { text: reg
+        ? `Прошу поставить на государственный учёт (зарегистрировать) транспортное средство в связи с приобретением по договору купли-продажи от «${data.day}» ${data.month} ${data.year} г.:`
+        : `Прошу прекратить государственный учёт транспортного средства в связи с его продажей по договору купли-продажи от «${data.day}» ${data.month} ${data.year} г.:`,
+      alignment: "justify", margin: [0, 0, 0, 6] },
+    { table: { widths: [150, "*"], body: carSpec(data).map(([k, v]) => [{ text: k, bold: true }, v || "—"]) }, layout: "lightHorizontalLines", margin: [0, 0, 0, 12] },
+    { columns: [{ text: `«${data.day}» ${data.month} ${data.year} г.` }, { text: `___________ / ${short}`, alignment: "right" }] },
+  ] });
+}
+function makeSpousePdf(data) {
+  return pdfBuffer({ content: [
+    ...pdfHeader(data, "СОГЛАСИЕ СУПРУГА НА ПРОДАЖУ", null),
+    { text: `Я, ${spLine(data.sp)}, состоящий(ая) в браке с ${data.seller_short}, в соответствии со ст. 35 Семейного кодекса РФ даю своё согласие на продажу транспортного средства, являющегося нашей совместной собственностью:`, alignment: "justify", margin: [0, 0, 0, 6] },
+    { text: carBrief(data), alignment: "justify", margin: [0, 0, 0, 6] },
+    { text: `Продажа осуществляется за цену ${data.price_num} (${data.price_words}) рублей и на условиях по усмотрению супруга(и). Содержание ст. 34, 35 Семейного кодекса РФ мне известно.`, alignment: "justify", margin: [0, 0, 0, 16] },
+    { columns: [{ text: `«${data.day}» ${data.month} ${data.year} г.` }, { text: `___________ / ${shortFio(data.sp.fio)}`, alignment: "right" }] },
+  ] });
+}
+function makeDovPdf(data) {
+  return pdfBuffer({ content: [
+    ...pdfHeader(data, "ДОВЕРЕННОСТЬ", null),
+    { text: `Я, ${personDesc(data, "buyer")} (Доверитель), настоящей доверенностью уполномочиваю ${spLine(data.dov)} (Поверенный) совершить от моего имени все необходимые действия по постановке на государственный учёт в подразделении Госавтоинспекции (ГИБДД) транспортного средства:`, alignment: "justify", margin: [0, 0, 0, 6] },
+    { text: carBrief(data), alignment: "justify", margin: [0, 0, 0, 6] },
+    { text: "Для выполнения поручения Поверенному предоставляется право подавать и получать документы, заявления и справки, расписываться, оплачивать государственные пошлины, получать свидетельство о регистрации (СТС), паспорт транспортного средства (ПТС) и государственные регистрационные знаки, а также совершать иные действия, связанные с данным поручением.", alignment: "justify", margin: [0, 0, 0, 6] },
+    { text: `Доверенность выдана сроком на ${data.dov.term} без права передоверия.`, margin: [0, 0, 0, 16] },
+    { columns: [{ text: `«${data.day}» ${data.month} ${data.year} г.` }, { text: `Доверитель: ___________ / ${data.buyer_short}`, alignment: "right" }] },
+  ] });
+}
+// Предпросмотры (HTML).
+function gibddHtml(data) {
+  const reg = data.gibdd_action !== "stop";
+  const applicant = reg ? personDesc(data, "buyer") : personDesc(data, "seller");
+  const short = reg ? data.buyer_short : data.seller_short;
+  const rows = carSpec(data).map(([k, v]) =>
+    `<tr><td style="font-weight:600;padding:4px 8px;border-bottom:1px solid #ddd;width:42%;vertical-align:top">${esc(k)}</td><td style="padding:4px 8px;border-bottom:1px solid #ddd;word-break:break-word">${esc(v || "—")}</td></tr>`).join("");
+  return docSheet(
+    `<div style="text-align:right;margin-bottom:2px">В ${esc(data.gibdd_dept || "_____________________")}</div>
+     <div style="text-align:right;margin-bottom:10px">от ${esc(applicant)}</div>
+     <div style="text-align:center;font-weight:700;font-size:16px;margin-bottom:10px">ЗАЯВЛЕНИЕ</div>
+     <p style="text-align:justify;margin:6px 0">${reg
+        ? `Прошу поставить на государственный учёт (зарегистрировать) транспортное средство в связи с приобретением по договору купли-продажи от «${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.:`
+        : `Прошу прекратить государственный учёт транспортного средства в связи с его продажей по договору купли-продажи от «${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.:`}</p>
+     <table style="width:100%;border-collapse:collapse;margin:6px 0">${rows}</table>
+     <p style="margin:10px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; ___________ / ${esc(short)}</p>`);
+}
+function spouseHtml(data) {
+  return docSheet(
+    docHead("СОГЛАСИЕ СУПРУГА НА ПРОДАЖУ", null, data) +
+    `<p style="text-align:justify;margin:6px 0">Я, ${esc(spLine(data.sp))}, состоящий(ая) в браке с ${esc(data.seller_short)}, в соответствии со ст. 35 Семейного кодекса РФ даю своё согласие на продажу транспортного средства, являющегося нашей совместной собственностью:</p>
+     <p style="text-align:justify;margin:6px 0">${esc(carBrief(data))}</p>
+     <p style="text-align:justify;margin:6px 0 16px">Продажа осуществляется за цену ${esc(data.price_num)} (${esc(data.price_words)}) рублей и на условиях по усмотрению супруга(и). Содержание ст. 34, 35 Семейного кодекса РФ мне известно.</p>
+     <p style="margin:6px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; ___________ / ${esc(shortFio(data.sp.fio))}</p>`);
+}
+function dovHtml(data) {
+  return docSheet(
+    docHead("ДОВЕРЕННОСТЬ", null, data) +
+    `<p style="text-align:justify;margin:6px 0">Я, ${esc(personDesc(data, "buyer"))} (Доверитель), настоящей доверенностью уполномочиваю ${esc(spLine(data.dov))} (Поверенный) совершить от моего имени все необходимые действия по постановке на государственный учёт в подразделении Госавтоинспекции (ГИБДД) транспортного средства:</p>
+     <p style="text-align:justify;margin:6px 0">${esc(carBrief(data))}</p>
+     <p style="text-align:justify;margin:6px 0">Для выполнения поручения Поверенному предоставляется право подавать и получать документы, расписываться, оплачивать пошлины, получать СТС, ПТС и государственные регистрационные знаки, а также совершать иные связанные действия.</p>
+     <p style="margin:6px 0 16px">Доверенность выдана сроком на ${esc(data.dov.term)} без права передоверия.</p>
+     <p style="margin:6px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; Доверитель: ___________ / ${esc(data.buyer_short)}</p>`);
+}
+
 // Сформированные файлы хранятся до подтверждения отправки.
 let gen = { docx: null, pdf: null, name: "", url: "", extras: [] };
 
@@ -846,25 +987,39 @@ async function generate() {
     if (!consentOk()) throw 0;
     const data = collect();
     if (!data.city || !data.price_num) { tg?.showAlert?.("Заполните город и цену."); throw 0; }
-    const wantAct = document.getElementById("doc_act")?.checked;
-    const wantRas = document.getElementById("doc_raspiska")?.checked;
+    collectExtraDocs(data);
+    const want = (id) => document.getElementById(id)?.checked;
+    const wantAct = want("doc_act"), wantRas = want("doc_raspiska");
+    const wantGibdd = want("doc_gibdd"), wantSpouse = want("doc_spouse"), wantDov = want("doc_dov");
+    // Проверка обязательных полей для доп. документов.
+    if (wantSpouse && !data.sp.fio) { tg?.showAlert?.("Укажите ФИО супруга(и) для согласия на продажу."); throw 0; }
+    if (wantDov && !data.dov.fio) { tg?.showAlert?.("Укажите ФИО поверенного для доверенности."); throw 0; }
     // Предпросмотр — все выбранные документы (адаптивный HTML), файлы готовим параллельно.
     let previewHtml = contractHtml(data);
     if (wantAct) previewHtml += actHtml(data);
     if (wantRas) previewHtml += raspiskaHtml(data);
+    if (wantGibdd) previewHtml += gibddHtml(data);
+    if (wantSpouse) previewHtml += spouseHtml(data);
+    if (wantDov) previewHtml += dovHtml(data);
     document.getElementById("previewBody").innerHTML = previewHtml;
     document.getElementById("preview").style.display = "flex";
     document.getElementById("previewBody").scrollTop = 0;
-    const [docxBuf, pdfBuf, actBuf, rasBuf] = await Promise.all([
+    const [docxBuf, pdfBuf, actBuf, rasBuf, gibddBuf, spouseBuf, dovBuf] = await Promise.all([
       makeDocx(data), makePdf(data),
       wantAct ? makeActPdf(data) : Promise.resolve(null),
       wantRas ? makeRaspiskaPdf(data) : Promise.resolve(null),
+      wantGibdd ? makeGibddPdf(data) : Promise.resolve(null),
+      wantSpouse ? makeSpousePdf(data) : Promise.resolve(null),
+      wantDov ? makeDovPdf(data) : Promise.resolve(null),
     ]);
     gen.docx = docxBuf; gen.pdf = pdfBuf;
     gen.name = `ДКП_${(data.car_brand || "авто").replace(/\s+/g, "_")}`;
     gen.extras = [];
     if (actBuf) gen.extras.push({ filename: "Акт_приёма-передачи.pdf", caption: "📄 Акт приёма-передачи (PDF)", buf: actBuf });
     if (rasBuf) gen.extras.push({ filename: "Расписка.pdf", caption: "📄 Расписка о получении денег (PDF)", buf: rasBuf });
+    if (gibddBuf) gen.extras.push({ filename: "Заявление_ГИБДД.pdf", caption: "📄 Заявление в ГИБДД (PDF)", buf: gibddBuf });
+    if (spouseBuf) gen.extras.push({ filename: "Согласие_супруга.pdf", caption: "📄 Согласие супруга (PDF)", buf: spouseBuf });
+    if (dovBuf) gen.extras.push({ filename: "Доверенность.pdf", caption: "📄 Доверенность (PDF)", buf: dovBuf });
     const parts = ["Договор (DOCX + PDF)", ...gen.extras.map((x) => x.caption.replace(/^📄 | \(PDF\)$/g, ""))];
     document.getElementById("pkgNote").textContent = "В чат придёт: " + parts.join(", ") + ".";
   } catch (e) { if (e !== 0) tg?.showAlert?.("Ошибка: " + (e.message || e)); }
