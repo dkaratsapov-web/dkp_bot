@@ -907,6 +907,13 @@ function carBrief(data) {
   return `${data.car_brand || "—"}, ${data.car_year || "—"} г.в., VIN ${data.car_vin || "—"}, ПТС серия ${data.pts_series || "—"} № ${data.pts_number || "—"}, госномер ${data.car_plate || "—"}`;
 }
 
+// Примечания-сноски к документам (что может не подойти).
+const NOTE_GIBDD = "Примечание: это вспомогательная форма. Подразделение ГИБДД может потребовать заполнить заявление на собственном (официальном) бланке. Госуслуги/МРЭО формируют заявление автоматически при подаче.";
+const NOTE_SPOUSE = "Примечание: согласие супруга на распоряжение совместным имуществом при необходимости удостоверяется нотариально; в простой письменной форме его может быть недостаточно для отдельных сделок.";
+const NOTE_DOV = "Примечание: для регистрационных действий в ГИБДД доверенность, как правило, требует нотариального удостоверения. Доверенность в простой письменной форме может быть не принята МРЭО.";
+function pdfNote(text) { return { text, italics: true, fontSize: 8, color: "#888", margin: [0, 22, 0, 0] }; }
+function htmlNote(text) { return `<p style="font-size:11px;color:#888;font-style:italic;margin:16px 0 0;border-top:1px solid #eee;padding-top:8px">${esc(text)}</p>`; }
+
 function makeGibddPdf(data) {
   const reg = data.gibdd_action !== "stop";
   const applicant = reg ? personDesc(data, "buyer") : personDesc(data, "seller");
@@ -921,6 +928,7 @@ function makeGibddPdf(data) {
       alignment: "justify", margin: [0, 0, 0, 6] },
     { table: { widths: [150, "*"], body: carSpec(data).map(([k, v]) => [{ text: k, bold: true }, v || "—"]) }, layout: "lightHorizontalLines", margin: [0, 0, 0, 12] },
     { columns: [{ text: `«${data.day}» ${data.month} ${data.year} г.` }, { text: `___________ / ${short}`, alignment: "right" }] },
+    pdfNote(NOTE_GIBDD),
   ] });
 }
 function makeSpousePdf(data) {
@@ -930,6 +938,7 @@ function makeSpousePdf(data) {
     { text: carBrief(data), alignment: "justify", margin: [0, 0, 0, 6] },
     { text: `Продажа осуществляется за цену ${data.price_num} (${data.price_words}) рублей и на условиях по усмотрению супруга(и). Содержание ст. 34, 35 Семейного кодекса РФ мне известно.`, alignment: "justify", margin: [0, 0, 0, 16] },
     { columns: [{ text: `«${data.day}» ${data.month} ${data.year} г.` }, { text: `___________ / ${shortFio(data.sp.fio)}`, alignment: "right" }] },
+    pdfNote(NOTE_SPOUSE),
   ] });
 }
 function makeDovPdf(data) {
@@ -940,6 +949,7 @@ function makeDovPdf(data) {
     { text: "Для выполнения поручения Поверенному предоставляется право подавать и получать документы, заявления и справки, расписываться, оплачивать государственные пошлины, получать свидетельство о регистрации (СТС), паспорт транспортного средства (ПТС) и государственные регистрационные знаки, а также совершать иные действия, связанные с данным поручением.", alignment: "justify", margin: [0, 0, 0, 6] },
     { text: `Доверенность выдана сроком на ${data.dov.term} без права передоверия.`, margin: [0, 0, 0, 16] },
     { columns: [{ text: `«${data.day}» ${data.month} ${data.year} г.` }, { text: `Доверитель: ___________ / ${data.buyer_short}`, alignment: "right" }] },
+    pdfNote(NOTE_DOV),
   ] });
 }
 // Предпросмотры (HTML).
@@ -957,7 +967,7 @@ function gibddHtml(data) {
         ? `Прошу поставить на государственный учёт (зарегистрировать) транспортное средство в связи с приобретением по договору купли-продажи от «${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.:`
         : `Прошу прекратить государственный учёт транспортного средства в связи с его продажей по договору купли-продажи от «${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.:`}</p>
      <table style="width:100%;border-collapse:collapse;margin:6px 0">${rows}</table>
-     <p style="margin:10px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; ___________ / ${esc(short)}</p>`);
+     <p style="margin:10px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; ___________ / ${esc(short)}</p>` + htmlNote(NOTE_GIBDD));
 }
 function spouseHtml(data) {
   return docSheet(
@@ -965,7 +975,7 @@ function spouseHtml(data) {
     `<p style="text-align:justify;margin:6px 0">Я, ${esc(spLine(data.sp))}, состоящий(ая) в браке с ${esc(data.seller_short)}, в соответствии со ст. 35 Семейного кодекса РФ даю своё согласие на продажу транспортного средства, являющегося нашей совместной собственностью:</p>
      <p style="text-align:justify;margin:6px 0">${esc(carBrief(data))}</p>
      <p style="text-align:justify;margin:6px 0 16px">Продажа осуществляется за цену ${esc(data.price_num)} (${esc(data.price_words)}) рублей и на условиях по усмотрению супруга(и). Содержание ст. 34, 35 Семейного кодекса РФ мне известно.</p>
-     <p style="margin:6px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; ___________ / ${esc(shortFio(data.sp.fio))}</p>`);
+     <p style="margin:6px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; ___________ / ${esc(shortFio(data.sp.fio))}</p>` + htmlNote(NOTE_SPOUSE));
 }
 function dovHtml(data) {
   return docSheet(
@@ -974,7 +984,7 @@ function dovHtml(data) {
      <p style="text-align:justify;margin:6px 0">${esc(carBrief(data))}</p>
      <p style="text-align:justify;margin:6px 0">Для выполнения поручения Поверенному предоставляется право подавать и получать документы, расписываться, оплачивать пошлины, получать СТС, ПТС и государственные регистрационные знаки, а также совершать иные связанные действия.</p>
      <p style="margin:6px 0 16px">Доверенность выдана сроком на ${esc(data.dov.term)} без права передоверия.</p>
-     <p style="margin:6px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; Доверитель: ___________ / ${esc(data.buyer_short)}</p>`);
+     <p style="margin:6px 0">«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г. &nbsp;&nbsp; Доверитель: ___________ / ${esc(data.buyer_short)}</p>` + htmlNote(NOTE_DOV));
 }
 
 // Сформированные файлы хранятся до подтверждения отправки.
