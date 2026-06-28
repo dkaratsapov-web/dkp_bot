@@ -180,7 +180,7 @@
 
 <div id="preview" style="display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column">
   <div style="padding:10px 12px;border-bottom:1px solid #0002">
-    <b style="font-size:15px">Предпросмотр договора</b>
+    <b style="font-size:15px">Предпросмотр документов</b>
     <div id="pkgNote" class="hint" style="margin:4px 0 0"></div>
   </div>
   <div id="previewBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea;padding:12px"></div>
@@ -726,6 +726,40 @@ function contractHtml(data) {
     <p style="margin:2px 0">ТС и документы получил, претензий не имею: _________ / ${esc(data.buyer_short)}</p>
   </div>`;
 }
+// Обёртка-«лист» для предпросмотра документа.
+function docSheet(inner) {
+  return `<div style="max-width:720px;margin:0 auto 14px;background:#fff;color:#111;padding:20px 18px;border-radius:6px;font-size:14px;line-height:1.45;box-shadow:0 1px 6px #0003">${inner}</div>`;
+}
+function docHead(title, sub, data) {
+  return `<div style="text-align:center;font-weight:700;font-size:16px;margin-bottom:${sub ? 2 : 10}px">${esc(title)}</div>` +
+    (sub ? `<div style="text-align:center;color:#444;margin-bottom:10px">${esc(sub)}</div>` : "") +
+    `<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:10px"><span>г. ${esc(data.city)}</span><span>«${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.</span></div>`;
+}
+// Предпросмотр акта приёма-передачи.
+function actHtml(data) {
+  const rows = carSpec(data).map(([k, v]) =>
+    `<tr><td style="font-weight:600;padding:4px 8px;border-bottom:1px solid #ddd;width:42%;vertical-align:top">${esc(k)}</td><td style="padding:4px 8px;border-bottom:1px solid #ddd;word-break:break-word">${esc(v || "—")}</td></tr>`).join("");
+  return docSheet(
+    docHead("АКТ ПРИЁМА-ПЕРЕДАЧИ ТРАНСПОРТНОГО СРЕДСТВА", `к договору купли-продажи от «${data.day}» ${data.month} ${data.year} г.`, data) +
+    `<p style="text-align:justify;margin:6px 0">${esc(personDesc(data, "seller"))}, именуем${esc(data.seller_end)} «Продавец», с одной стороны, и</p>
+     <p style="text-align:justify;margin:6px 0">${esc(personDesc(data, "buyer"))}, именуем${esc(data.buyer_end)} «Покупатель», с другой стороны, составили настоящий акт о нижеследующем:</p>
+     <p style="margin:6px 0">1. Продавец передал, а Покупатель принял транспортное средство:</p>
+     <table style="width:100%;border-collapse:collapse;margin:6px 0">${rows}</table>
+     <p style="margin:4px 0">2. Вместе с ТС переданы: ПТС, СТС и комплект ключей.</p>
+     <p style="text-align:justify;margin:4px 0">3. Техническое состояние ТС Покупателем проверено; претензий к комплектности, внешнему виду и техническому состоянию не имеет.</p>
+     <p style="margin:4px 0">4. Расчёт произведён полностью. Стоимость ТС — ${esc(data.price_num)} (${esc(data.price_words)}) рублей.</p>
+     <p style="text-align:justify;margin:4px 0 12px">5. Акт составлен в двух экземплярах и является неотъемлемой частью договора.</p>
+     <div style="display:flex;gap:16px;flex-wrap:wrap"><div style="flex:1;min-width:140px">ПЕРЕДАЛ (Продавец):<br><br>_________ / ${esc(data.seller_short)}</div><div style="flex:1;min-width:140px">ПРИНЯЛ (Покупатель):<br><br>_________ / ${esc(data.buyer_short)}</div></div>`);
+}
+// Предпросмотр расписки.
+function raspiskaHtml(data) {
+  return docSheet(
+    docHead("РАСПИСКА", "в получении денежных средств", data) +
+    `<p style="text-align:justify;margin:6px 0">Я, ${esc(personDesc(data, "seller"))}, получил(а) от ${esc(personDesc(data, "buyer"))} денежные средства в сумме ${esc(data.price_num)} (${esc(data.price_words)}) рублей в счёт оплаты по договору купли-продажи транспортного средства от «${esc(data.day)}» ${esc(data.month)} ${esc(data.year)} г.</p>
+     <p style="text-align:justify;margin:6px 0">Проданное транспортное средство: ${esc(data.car_brand || "—")}, ${esc(data.car_year || "—")} г.в., VIN ${esc(data.car_vin || "—")}, госномер ${esc(data.car_plate || "—")}.</p>
+     <p style="text-align:justify;margin:6px 0 16px">Денежные средства получены мной полностью. Расчёт по договору произведён в полном объёме, претензий по оплате к Покупателю не имею.</p>
+     <p style="margin:6px 0">Деньги получил(а): _________ / ${esc(data.seller_short)}</p>`);
+}
 
 function makePdf(data) {
   const spec = carSpec(data);
@@ -812,12 +846,15 @@ async function generate() {
     if (!consentOk()) throw 0;
     const data = collect();
     if (!data.city || !data.price_num) { tg?.showAlert?.("Заполните город и цену."); throw 0; }
-    // Предпросмотр — сразу из данных (адаптивный HTML), файлы готовим параллельно.
-    document.getElementById("previewBody").innerHTML = contractHtml(data);
-    document.getElementById("preview").style.display = "flex";
-    document.getElementById("previewBody").scrollTop = 0;
     const wantAct = document.getElementById("doc_act")?.checked;
     const wantRas = document.getElementById("doc_raspiska")?.checked;
+    // Предпросмотр — все выбранные документы (адаптивный HTML), файлы готовим параллельно.
+    let previewHtml = contractHtml(data);
+    if (wantAct) previewHtml += actHtml(data);
+    if (wantRas) previewHtml += raspiskaHtml(data);
+    document.getElementById("previewBody").innerHTML = previewHtml;
+    document.getElementById("preview").style.display = "flex";
+    document.getElementById("previewBody").scrollTop = 0;
     const [docxBuf, pdfBuf, actBuf, rasBuf] = await Promise.all([
       makeDocx(data), makePdf(data),
       wantAct ? makeActPdf(data) : Promise.resolve(null),
