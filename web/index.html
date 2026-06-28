@@ -280,6 +280,9 @@ async function renderAdmin() {
     row("Выручка всего", rubF(s.revenue) + " ₽") +
     row("За 30 дней", s.cnt30 + " · " + rubF(s.rev30) + " ₽") +
     '<p class="hint" style="margin:8px 0 2px">По тарифам:</p>' + planLines +
+    H("💰 Цены, ₽") +
+    (subCfg.tariffs || []).map((t) => `<div class="row" style="align-items:center;margin-bottom:6px"><div style="flex:1;color:var(--hint)">${t.title}</div><input id="price-${t.key}" inputmode="numeric" value="${t.price}" style="flex:1" /></div>`).join("") +
+    '<button class="btn" style="width:100%;margin-top:2px" onclick="admSavePrices()">Сохранить цены</button>' +
     H("🧾 Последние платежи") + payLines +
     H("👤 Пользователь") +
     '<input id="adm-uid" inputmode="numeric" placeholder="Telegram ID пользователя" />' +
@@ -325,6 +328,18 @@ async function admAddAdmin() {
   renderAdmin();
 }
 async function admDelAdmin(id) { await adminApi("admin_remove", { userId: id }); renderAdmin(); }
+async function admSavePrices() {
+  const prices = {};
+  for (const k of ["one", "m1", "m3", "m6"]) {
+    const el = document.getElementById("price-" + k);
+    if (el && el.value) prices[k] = Number(el.value);
+  }
+  const d = await adminApi("set_prices", { prices });
+  if (d.error) { tg?.showAlert?.("Ошибка: " + d.error); return; }
+  await loadSub();            // обновить subCfg.tariffs
+  renderAdmin();
+  tg?.showAlert?.("Цены сохранены.");
+}
 
 // Оплата через Тинькофф: создаём платёж и открываем оплату В ТОМ ЖЕ ОКНЕ.
 // Перед уходом сохраняем форму и initData; Тинькофф вернёт обратно (?dkp=paid) — восстановим.
