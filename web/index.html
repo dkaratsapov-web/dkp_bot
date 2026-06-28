@@ -37,6 +37,11 @@
              background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 0 0 12px; }
   .consent input { width: 18px; height: 18px; flex: none; margin-top: 1px; accent-color: var(--brand); }
   .consent a { color: var(--brand-l); }
+  /* Пакет документов */
+  .doc-opt { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 8px 0; cursor: pointer; }
+  .doc-opt + .doc-opt { border-top: 1px solid var(--line); }
+  .doc-opt input { width: 18px; height: 18px; flex: none; accent-color: var(--brand); }
+  .doc-opt .tag { font-size: 11px; color: var(--hint); }
   /* Тарифы (виды оплаты) */
   .tariff { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer;
             border: 1.5px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg);
@@ -132,9 +137,16 @@
   <input id="price_words" placeholder="Один миллион восемьсот пятьдесят тысяч" />
 </div>
 
+<h2>Пакет документов</h2>
+<div class="card">
+  <label class="doc-opt"><input type="checkbox" id="doc_dkp" checked disabled /> <span>Договор купли-продажи <span class="tag">(DOCX + PDF, обязательно)</span></span></label>
+  <label class="doc-opt"><input type="checkbox" id="doc_act" /> <span>Акт приёма-передачи ТС <span class="tag">(PDF)</span></span></label>
+  <label class="doc-opt"><input type="checkbox" id="doc_raspiska" /> <span>Расписка о получении денег <span class="tag">(PDF)</span></span></label>
+</div>
+
 <div class="legal">ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</div>
 
-<button class="submit" id="go" onclick="generate()">Сформировать договор</button>
+<button class="submit" id="go" onclick="generate()">Сформировать документы</button>
 
 <div id="paywall" style="display:flex;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
   <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
@@ -160,8 +172,9 @@
 </div>
 
 <div id="preview" style="display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column">
-  <div style="padding:10px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #0002">
-    <b style="flex:1;font-size:15px">Предпросмотр договора</b>
+  <div style="padding:10px 12px;border-bottom:1px solid #0002">
+    <b style="font-size:15px">Предпросмотр договора</b>
+    <div id="pkgNote" class="hint" style="margin:4px 0 0"></div>
   </div>
   <div id="previewBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea;padding:12px"></div>
   <div style="padding:10px 12px;display:flex;gap:8px;border-top:1px solid #0002">
@@ -654,6 +667,10 @@ function partyLine(d, pre, role) {
     ? `${d[pre+"_org_name"]}, ОГРН ${d[pre+"_ogrn"]}, ИНН ${d[pre+"_inn"]}, адрес: ${d[pre+"_address"]}, в лице ${d[pre+"_signer_role"]} ${d[pre+"_signer_fio"]}, действующего на основании ${d[pre+"_basis"]}, именуем${d[pre+"_end"]} «${role}»`
     : `${d[pre+"_fio"]}, ${d[pre+"_birth"]} г.р., паспорт ${d[pre+"_pasp_series"]} № ${d[pre+"_pasp_number"]}, выдан ${d[pre+"_pasp_issued_by"]} ${d[pre+"_pasp_issued_date"]}, код ${d[pre+"_pasp_code"]}, адрес: ${d[pre+"_address"]}, именуем${d[pre+"_end"]} «${role}»`;
 }
+// Описание стороны без хвоста «именуемый …» (для акта и расписки).
+function personDesc(d, pre) {
+  return partyLine(d, pre, "_").replace(/, именуем.*$/, "");
+}
 // Спецификация ТС (общая для PDF и предпросмотра).
 function carSpec(data) {
   return [
@@ -726,8 +743,51 @@ function makePdf(data) {
   return new Promise((res) => pdfMake.createPdf(dd).getBuffer((buf) => res(buf)));
 }
 
+// Общая шапка документа пакета (город/дата + стороны).
+function pdfHeader(data, title, subtitle) {
+  const h = [{ text: title, bold: true, fontSize: 13, alignment: "center", margin: [0, 0, 0, subtitle ? 2 : 8] }];
+  if (subtitle) h.push({ text: subtitle, alignment: "center", margin: [0, 0, 0, 8] });
+  h.push({ columns: [{ text: "г. " + data.city }, { text: `«${data.day}» ${data.month} ${data.year} г.`, alignment: "right" }], margin: [0, 0, 0, 8] });
+  return h;
+}
+function pdfBuffer(dd) {
+  dd.pageSize = "A4"; dd.pageMargins = [50, 40, 40, 40];
+  dd.defaultStyle = { font: "Roboto", fontSize: 10 };
+  return new Promise((res) => pdfMake.createPdf(dd).getBuffer((buf) => res(buf)));
+}
+// Акт приёма-передачи ТС (к договору). Те же данные, что в договоре.
+function makeActPdf(data) {
+  const spec = carSpec(data);
+  return pdfBuffer({ content: [
+    ...pdfHeader(data, "АКТ ПРИЁМА-ПЕРЕДАЧИ ТРАНСПОРТНОГО СРЕДСТВА",
+      `к договору купли-продажи от «${data.day}» ${data.month} ${data.year} г.`),
+    { text: personDesc(data, "seller") + `, именуем${data.seller_end} «Продавец», с одной стороны, и`, margin: [0, 0, 0, 4], alignment: "justify" },
+    { text: personDesc(data, "buyer") + `, именуем${data.buyer_end} «Покупатель», с другой стороны, составили настоящий акт о нижеследующем:`, margin: [0, 0, 0, 8], alignment: "justify" },
+    { text: "1. Продавец передал, а Покупатель принял транспортное средство:", margin: [0, 0, 0, 4] },
+    { table: { widths: [150, "*"], body: spec.map(([k, v]) => [{ text: k, bold: true }, v || "—"]) }, layout: "lightHorizontalLines", margin: [0, 0, 0, 6] },
+    { text: "2. Вместе с ТС переданы: паспорт транспортного средства (ПТС), свидетельство о регистрации (СТС) и комплект ключей.", margin: [0, 0, 0, 4] },
+    { text: "3. Техническое состояние ТС Покупателем проверено. ТС осмотрено; претензий к комплектности, внешнему виду и техническому состоянию Покупатель не имеет.", margin: [0, 0, 0, 4], alignment: "justify" },
+    { text: `4. Расчёт между сторонами произведён полностью. Стоимость ТС составляет ${data.price_num} (${data.price_words}) рублей.`, margin: [0, 0, 0, 4] },
+    { text: "5. Настоящий акт составлен в двух экземплярах, по одному для каждой из сторон, и является неотъемлемой частью договора купли-продажи.", margin: [0, 0, 0, 12], alignment: "justify" },
+    { columns: [
+      { text: `ПЕРЕДАЛ (Продавец):\n\n___________ / ${data.seller_short}` },
+      { text: `ПРИНЯЛ (Покупатель):\n\n___________ / ${data.buyer_short}` } ] },
+  ] });
+}
+// Расписка продавца о получении денег по договору.
+function makeRaspiskaPdf(data) {
+  return pdfBuffer({ content: [
+    ...pdfHeader(data, "РАСПИСКА", "в получении денежных средств"),
+    { text: `Я, ${personDesc(data, "seller")}, получил(а) от ${personDesc(data, "buyer")} денежные средства в сумме ${data.price_num} (${data.price_words}) рублей в счёт оплаты по договору купли-продажи транспортного средства от «${data.day}» ${data.month} ${data.year} г.`, margin: [0, 0, 0, 6], alignment: "justify" },
+    { text: `Проданное транспортное средство: ${data.car_brand || "—"}, ${data.car_year || "—"} г.в., VIN ${data.car_vin || "—"}, госномер ${data.car_plate || "—"}.`, margin: [0, 0, 0, 6], alignment: "justify" },
+    { text: "Денежные средства получены мной полностью. Расчёт по договору произведён в полном объёме, претензий по оплате к Покупателю не имею.", margin: [0, 0, 0, 16], alignment: "justify" },
+    { columns: [
+      { text: `Деньги получил(а):\n\n___________ / ${data.seller_short}`, width: "*" } ] },
+  ] });
+}
+
 // Сформированные файлы хранятся до подтверждения отправки.
-let gen = { docx: null, pdf: null, name: "", url: "" };
+let gen = { docx: null, pdf: null, name: "", url: "", extras: [] };
 
 async function generate() {
   const btn = document.getElementById("go");
@@ -740,11 +800,22 @@ async function generate() {
     document.getElementById("previewBody").innerHTML = contractHtml(data);
     document.getElementById("preview").style.display = "flex";
     document.getElementById("previewBody").scrollTop = 0;
-    const [docxBuf, pdfBuf] = await Promise.all([makeDocx(data), makePdf(data)]);
+    const wantAct = document.getElementById("doc_act")?.checked;
+    const wantRas = document.getElementById("doc_raspiska")?.checked;
+    const [docxBuf, pdfBuf, actBuf, rasBuf] = await Promise.all([
+      makeDocx(data), makePdf(data),
+      wantAct ? makeActPdf(data) : Promise.resolve(null),
+      wantRas ? makeRaspiskaPdf(data) : Promise.resolve(null),
+    ]);
     gen.docx = docxBuf; gen.pdf = pdfBuf;
     gen.name = `ДКП_${(data.car_brand || "авто").replace(/\s+/g, "_")}`;
+    gen.extras = [];
+    if (actBuf) gen.extras.push({ filename: "Акт_приёма-передачи.pdf", caption: "📄 Акт приёма-передачи (PDF)", buf: actBuf });
+    if (rasBuf) gen.extras.push({ filename: "Расписка.pdf", caption: "📄 Расписка о получении денег (PDF)", buf: rasBuf });
+    const parts = ["Договор (DOCX + PDF)", ...gen.extras.map((x) => x.caption.replace(/^📄 | \(PDF\)$/g, ""))];
+    document.getElementById("pkgNote").textContent = "В чат придёт: " + parts.join(", ") + ".";
   } catch (e) { if (e !== 0) tg?.showAlert?.("Ошибка: " + (e.message || e)); }
-  finally { btn.textContent = "Сформировать договор"; btn.disabled = false; }
+  finally { btn.textContent = "Сформировать документы"; btn.disabled = false; }
 }
 function closePreview() {
   document.getElementById("preview").style.display = "none";
@@ -763,13 +834,16 @@ async function sendGenerated() {
       body: JSON.stringify({
         initData: initData, filename: gen.name,
         docx_base64: bufToB64(gen.docx), pdf_base64: bufToB64(gen.pdf),
+        extras: (gen.extras || []).map((x) => ({
+          filename: `${gen.name}_${x.filename}`, caption: x.caption, pdf_base64: bufToB64(x.buf),
+        })),
       }),
     });
     if (r.status === 402) { await loadSub(); openPaywall(); return; }
     const out = await r.json();
     if (out.ok) {
       closePreview();
-      let msg = "Готово! Договор отправлен в чат.";
+      let msg = (gen.extras && gen.extras.length) ? "Готово! Документы отправлены в чат." : "Готово! Договор отправлен в чат.";
       if (typeof out.credits === "number") msg += `\nОсталось договоров: ${out.credits}.`;
       else if (out.sub) msg += `\nПодписка активна до ${new Date(out.sub).toLocaleDateString("ru-RU")}.`;
       tg?.showAlert?.(msg);
