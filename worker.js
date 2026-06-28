@@ -517,18 +517,21 @@ async function recentPayments(env, n) {
 function num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; }
 
 // Виды оплаты: разовый доступ (кредит на 1 договор) + подписки на срок.
-// Цены можно переопределить переменными воркера (PRICE_ONE/PRICE_1M/PRICE_3M/PRICE_6M).
-function tariffs(env) {
+// Цена: переопределение из KV (prices, меняется в админке) → переменная воркера → дефолт.
+async function tariffs(env) {
+  let ov = {};
+  if (env.SUBS) { try { ov = JSON.parse((await env.SUBS.get("prices")) || "{}"); } catch (e) { /* ignore */ } }
+  const p = (key, envName, d) => num(ov[key], num(env[envName], d));
   return [
-    { key: "one", title: "Один договор", note: "разовый доступ", price: num(env.PRICE_ONE, 99), credits: 1 },
-    { key: "m1", title: "1 месяц", note: "безлимит на 30 дней", price: num(env.PRICE_1M, 500), days: 30 },
-    { key: "m3", title: "3 месяца", note: "безлимит на 90 дней", price: num(env.PRICE_3M, 1200), days: 90 },
-    { key: "m6", title: "Полгода", note: "безлимит на 180 дней", price: num(env.PRICE_6M, 2000), days: 180 },
+    { key: "one", title: "Один договор", note: "разовый доступ", price: p("one", "PRICE_ONE", 99), credits: 1 },
+    { key: "m1", title: "1 месяц", note: "безлимит на 30 дней", price: p("m1", "PRICE_1M", 500), days: 30 },
+    { key: "m3", title: "3 месяца", note: "безлимит на 90 дней", price: p("m3", "PRICE_3M", 1200), days: 90 },
+    { key: "m6", title: "Полгода", note: "безлимит на 180 дней", price: p("m6", "PRICE_6M", 2000), days: 180 },
   ];
 }
 // Тариф по ключу из платежа (Data.plan); запасной матч — по сумме.
-function findTariff(env, key, amount) {
-  const list = tariffs(env);
+async function findTariff(env, key, amount) {
+  const list = await tariffs(env);
   if (key) { const t = list.find((x) => x.key === key); if (t) return t; }
   return list.find((x) => Math.abs(x.price - Number(amount || 0)) < 0.5) || null;
 }
@@ -847,7 +850,7 @@ export default {
     if (url.pathname === "/api/config") {
       return json({
         subEnabled: subEnabled(env), provider: payProvider(env),
-        cpPublicId: env.CP_PUBLIC_ID || "", tariffs: tariffs(env),
+        cpPublicId: env.CP_PUBLIC_ID || "", tariffs: await tariffs(env),
       });
     }
 
@@ -898,7 +901,7 @@ export default {
         }
         case "grant": {
           if (!/^\d+$/.test(uid)) return json({ error: "bad_id" }, 400);
-          const t = findTariff(env, b.plan);
+          const t = await findTariff(env, b.plan);
           if (!t) return json({ error: "bad_plan" }, 400);
           if (t.days) { const u2 = await grantSub(env, uid, t.days); return json({ ok: true, until: u2 }); }
           const n = await addCredits(env, uid, t.credits || 1);
@@ -907,6 +910,15 @@ export default {
         case "reset":
           if (env.SUBS) { await env.SUBS.delete("credits:" + uid); await env.SUBS.delete("sub:" + uid); }
           return json({ ok: true });
+        case "set_prices": {
+          const pr = b.prices || {}; const clean = {};
+          for (const key of ["one", "m1", "m3", "m6"]) {
+            const v = Number(pr[key]);
+            if (Number.isFinite(v) && v > 0) clean[key] = Math.round(v);
+          }
+          if (env.SUBS) await env.SUBS.put("prices", JSON.stringify(clean));
+          return json({ ok: true, tariffs: await tariffs(env) });
+        }
         default: return json({ error: "bad_action" }, 400);
       }
     }
@@ -917,7 +929,7 @@ export default {
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       if (payProvider(env) !== "tinkoff") return json({ error: "not_tinkoff" }, 400);
-      const t = findTariff(env, b.plan);
+      const t = await findTariff(env, b.plan);
       if (!t) return json({ error: "bad_plan" }, 400);
       const res = await tinkoffInit(env, auth.user.id, t, url.origin);
       return json(res, res.error ? 502 : 200);
@@ -934,7 +946,7 @@ export default {
       if (env.SUBS && userId && body.Success && body.Status === "CONFIRMED") {
         const payKey = "tpay:" + body.PaymentId;
         if (await env.SUBS.get(payKey)) return new Response("OK");   // идемпотентность
-        const t = findTariff(env, planKey, amount);
+        const t = await findTariff(env, planKey, amount);
         if (t) {
           await env.SUBS.put(payKey, "1",
             { expirationTtl: 60 * 60 * 24 * 400, metadata: { a: amount, p: t.key, t: Date.now(), k: t.days ? "sub" : "credit", u: String(userId) } });
@@ -966,7 +978,7 @@ export default {
       // (Data.cc="dkp" или InvoiceId "dkp-*") — страховка от чужих уведомлений.
       if (data.cc !== "dkp" && !invoiceId.startsWith("dkp-")) return json({ code: 0 });
       if (env.SUBS && userId && (status === "Completed" || status === "Authorized")) {
-        const t = findTariff(env, data.plan, amount);
+        const t = await findTariff(env, data.plan, amount);
         if (t && t.days) {
           await grantSub(env, userId, t.days);
           await tg(env, "sendMessage", {
