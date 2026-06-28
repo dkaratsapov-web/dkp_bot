@@ -687,13 +687,15 @@ async function handleUpdate(env, update) {
 
   if (text === "/start" || text === "/dkp") {
     const url = env.MINI_APP_URL;
+    const t = await tariffs(env);
+    const tariffsLine = `💳 *Тарифы:* ${t[0].title} — ${t[0].price} ₽, ${t[1].title} — ${t[1].price} ₽, ${t[2].title} — ${t[2].price} ₽, ${t[3].title} — ${t[3].price} ₽.`;
     await tg(env, "sendMessage", {
       chat_id: chatId,
       text:
         "🚗 *Оформление договора купли-продажи ТС*\n\n" +
         "Загрузите фото паспорта и СТС, проверьте данные — " +
         "и бот пришлёт готовый договор (DOCX + PDF).\n\n" +
-        "💳 *Тарифы:* 1 договор — 99 ₽, месяц — 500 ₽, 3 месяца — 1200 ₽, полгода — 2000 ₽.",
+        tariffsLine,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
