@@ -34,6 +34,39 @@ async function sendDocument(env, chatId, filename, base64, caption) {
   });
 }
 
+// Отправка документов письмом через Resend (secret RESEND_API_KEY, var RESEND_FROM).
+async function sendEmail(env, to, docs) {
+  if (!env.RESEND_API_KEY) return { ok: false, error: "email_not_configured" };
+  const from = env.RESEND_FROM || "Безопасный автодоговор <onboarding@resend.dev>";
+  const attachments = docs.map((d) => ({ filename: d.fn, content: d.b64 }));
+  const html = "<p>Здравствуйте!</p><p>Во вложении документы по сделке купли-продажи транспортного средства.</p>" +
+    "<p>Сформировано ботом «Безопасный автодоговор».</p>";
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ from, to: [to], subject: "Документы по сделке купли-продажи ТС", html, attachments }),
+  });
+  if (!r.ok) { let t = ""; try { t = await r.text(); } catch (e) {} return { ok: false, error: "resend_" + r.status, detail: t.slice(0, 200) }; }
+  return { ok: true };
+}
+
+// Username бота (для deep-link), кэшируется на время жизни инстанса воркера.
+let _botUsername = null;
+async function botUsername(env) {
+  if (_botUsername) return _botUsername;
+  try { const r = await (await tg(env, "getMe", {})).json(); _botUsername = r?.result?.username || null; } catch (e) {}
+  return _botUsername;
+}
+
+// Сохранить пакет документов в KV и вернуть deep-link для второй стороны (TTL 7 дней).
+async function createShareLink(env, docs) {
+  if (!env.SUBS) return null;
+  const token = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  await env.SUBS.put("share:" + token, JSON.stringify({ docs, t: Date.now() }), { expirationTtl: 7 * 24 * 3600 });
+  const u = await botUsername(env);
+  return u ? `https://t.me/${u}?start=doc_${token}` : null;
+}
+
 /* ---------- Auth: проверка Telegram initData ---------- */
 async function hmac(keyBytes, msgBytes) {
   const key = await crypto.subtle.importKey(
@@ -685,6 +718,24 @@ async function handleUpdate(env, update) {
   const chatId = msg.chat.id;
   const text = (msg.text || "").trim();
 
+  // Deep-link «/start doc_<token>» — выдать пакет документов, которым поделилась вторая сторона.
+  if (text.startsWith("/start ")) {
+    const payload = text.slice(7).trim();
+    if (payload.startsWith("doc_") && env.SUBS) {
+      const raw = await env.SUBS.get("share:" + payload.slice(4));
+      if (raw) {
+        try {
+          const pack = JSON.parse(raw);
+          for (const d of (pack.docs || [])) await sendDocument(env, chatId, d.fn, d.b64, d.cap || "");
+          await tg(env, "sendMessage", { chat_id: chatId, text: "📎 Документы по сделке купли-продажи ТС." });
+        } catch (e) { await tg(env, "sendMessage", { chat_id: chatId, text: "Не удалось получить документы по ссылке." }); }
+      } else {
+        await tg(env, "sendMessage", { chat_id: chatId, text: "Ссылка устарела или недействительна (срок — 7 дней)." });
+      }
+      return;
+    }
+  }
+
   if (text === "/start" || text === "/dkp") {
     const url = env.MINI_APP_URL;
     const t = await tariffs(env);
@@ -1016,25 +1067,38 @@ export default {
         }
       }
       const base = b.filename || "ДКП";
+      // Собираем все документы пакета в один список {fn, b64, cap}.
+      const docs = [];
+      if (b.docx_base64) docs.push({ fn: `${base}.docx`, b64: b.docx_base64, cap: "📄 Договор (Word)" });
+      if (b.pdf_base64) docs.push({ fn: `${base}.pdf`, b64: b.pdf_base64, cap: "📄 Договор (PDF)" });
+      for (const ex of (Array.isArray(b.extras) ? b.extras.slice(0, 5) : [])) {
+        if (ex && ex.pdf_base64) docs.push({ fn: String(ex.filename || "Документ.pdf").slice(0, 120), b64: ex.pdf_base64, cap: ex.caption || "" });
+      }
+      if (!docs.length) return json({ error: "no_docs" }, 400);
+      // Каналы доставки: мне в чат (по умолчанию), на почту, ссылка второй стороне.
+      const toMe = b.toMe !== false;
+      const email = (typeof b.email === "string" && b.email.includes("@")) ? b.email.trim() : "";
+      const wantShare = !!b.share;
+      let shareUrl = null, emailSent = false, emailError = null, delivered = false;
       try {
-        const r1 = b.docx_base64
-          ? await sendDocument(env, auth.user.id, `${base}.docx`, b.docx_base64, "📄 Договор (Word)") : null;
-        const r2 = b.pdf_base64
-          ? await sendDocument(env, auth.user.id, `${base}.pdf`, b.pdf_base64, "📄 Договор (PDF)") : null;
-        if ((r1 && !r1.ok) || (r2 && !r2.ok)) throw new Error("telegram_send");
-        // Доп. документы пакета (акт, расписка и т.п.) — PDF из мини-аппа.
-        const extras = Array.isArray(b.extras) ? b.extras.slice(0, 5) : [];
-        for (const ex of extras) {
-          if (!ex || !ex.pdf_base64) continue;
-          const fn = String(ex.filename || "Документ.pdf").slice(0, 120);
-          const re = await sendDocument(env, auth.user.id, fn, ex.pdf_base64, ex.caption || "");
-          if (!re.ok) throw new Error("telegram_send");
+        if (toMe) {
+          for (const d of docs) { const r = await sendDocument(env, auth.user.id, d.fn, d.b64, d.cap); if (!r.ok) throw new Error("telegram_send"); }
+          delivered = true;
         }
+        if (email) {
+          const er = await sendEmail(env, email, docs);
+          emailSent = er.ok; if (er.ok) delivered = true; else emailError = er.error;
+        }
+        if (wantShare) {
+          shareUrl = await createShareLink(env, docs);
+          if (shareUrl) delivered = true;
+        }
+        if (!delivered) throw new Error("not_delivered");
       } catch (e) {
         if (usedCredit) await addCredits(env, auth.user.id, 1); // вернуть списанный кредит
-        return json({ error: "send_failed" }, 502);
+        return json({ error: "send_failed", detail: String(e.message || e) }, 502);
       }
-      return json({ ok: true, credits: remainingCredits, sub: subUntilMs || undefined });
+      return json({ ok: true, credits: remainingCredits, sub: subUntilMs || undefined, shareUrl, emailSent, emailError });
     }
 
     // health
