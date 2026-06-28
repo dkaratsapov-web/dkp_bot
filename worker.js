@@ -692,14 +692,14 @@ async function handleUpdate(env, update) {
     await tg(env, "sendMessage", {
       chat_id: chatId,
       text:
-        "🚗 *Оформление договора купли-продажи ТС*\n\n" +
-        "Загрузите фото паспорта и СТС, проверьте данные — " +
-        "и бот пришлёт готовый договор (DOCX + PDF).\n\n" +
+        "🚗 *Безопасный автодоговор*\n\n" +
+        "Загрузите фото паспорта и СТС — бот распознает данные и пришлёт готовый " +
+        "пакет документов: договор купли-продажи (DOCX + PDF), акт приёма-передачи и расписку.\n\n" +
         tariffsLine,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [{ text: "📝 Оформить ДКП", web_app: { url } }],
+          [{ text: "🚀 Запустить бот", web_app: { url } }],
           [{ text: "🚘 Узнать про подбор автомобиля", url: "https://t.me/AvtoPodbor251" }],
         ],
       },
