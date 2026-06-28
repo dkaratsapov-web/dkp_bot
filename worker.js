@@ -1022,6 +1022,14 @@ export default {
         const r2 = b.pdf_base64
           ? await sendDocument(env, auth.user.id, `${base}.pdf`, b.pdf_base64, "📄 Договор (PDF)") : null;
         if ((r1 && !r1.ok) || (r2 && !r2.ok)) throw new Error("telegram_send");
+        // Доп. документы пакета (акт, расписка и т.п.) — PDF из мини-аппа.
+        const extras = Array.isArray(b.extras) ? b.extras.slice(0, 5) : [];
+        for (const ex of extras) {
+          if (!ex || !ex.pdf_base64) continue;
+          const fn = String(ex.filename || "Документ.pdf").slice(0, 120);
+          const re = await sendDocument(env, auth.user.id, fn, ex.pdf_base64, ex.caption || "");
+          if (!re.ok) throw new Error("telegram_send");
+        }
       } catch (e) {
         if (usedCredit) await addCredits(env, auth.user.id, 1); // вернуть списанный кредит
         return json({ error: "send_failed" }, 502);
