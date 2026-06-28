@@ -230,9 +230,16 @@
     <div id="pkgNote" class="hint" style="margin:4px 0 0"></div>
   </div>
   <div id="previewBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea;padding:12px"></div>
-  <div style="padding:10px 12px;display:flex;gap:8px;border-top:1px solid #0002">
+  <div style="padding:8px 12px 0;border-top:1px solid #0002">
+    <div class="hint" style="margin:0 0 4px">Куда отправить:</div>
+    <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_me" checked /> <span>Мне в чат с ботом</span></label>
+    <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_email" onchange="document.getElementById('extra_email').classList.toggle('on', this.checked)" /> <span>На электронную почту</span></label>
+    <div class="doc-extra" id="extra_email"><input id="email_to" type="email" inputmode="email" autocomplete="email" placeholder="email@example.com" /></div>
+    <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_share" /> <span>Ссылка второй стороне (Telegram)</span></label>
+  </div>
+  <div style="padding:8px 12px;display:flex;gap:8px">
     <button class="btn sec" style="flex:1" onclick="closePreview()">✏️ Изменить</button>
-    <button class="btn" style="flex:2" id="sendBtn" onclick="sendGenerated()">✅ Отправить в чат</button>
+    <button class="btn" style="flex:2" id="sendBtn" onclick="sendGenerated()">✅ Отправить</button>
   </div>
 </div>
 
@@ -1044,6 +1051,13 @@ async function sendGenerated() {
     await loadSub();
     if (!subIsActive) { openPaywall(); return; }
   }
+  // Каналы доставки.
+  const toMe = document.getElementById("dlv_me")?.checked;
+  const wantEmail = document.getElementById("dlv_email")?.checked;
+  const email = wantEmail ? val("email_to") : "";
+  const wantShare = document.getElementById("dlv_share")?.checked;
+  if (!toMe && !wantEmail && !wantShare) { tg?.showAlert?.("Выберите, куда отправить документы."); return; }
+  if (wantEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { tg?.showAlert?.("Укажите корректный адрес почты."); return; }
   const sb = document.getElementById("sendBtn");
   sb.textContent = "Отправляю…"; sb.disabled = true;
   try {
@@ -1051,6 +1065,7 @@ async function sendGenerated() {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
         initData: initData, filename: gen.name,
+        toMe: !!toMe, email, share: !!wantShare,
         docx_base64: bufToB64(gen.docx), pdf_base64: bufToB64(gen.pdf),
         extras: (gen.extras || []).map((x) => ({
           filename: `${gen.name}_${x.filename}`, caption: x.caption, pdf_base64: bufToB64(x.buf),
@@ -1061,15 +1076,23 @@ async function sendGenerated() {
     const out = await r.json();
     if (out.ok) {
       closePreview();
-      let msg = (gen.extras && gen.extras.length) ? "Готово! Документы отправлены в чат." : "Готово! Договор отправлен в чат.";
+      let msg = "Готово!";
+      if (toMe) msg += " Документы отправлены в чат.";
+      if (wantEmail) msg += out.emailSent ? `\nПисьмо отправлено на ${email}.` : "\nНа почту отправить не удалось (проверьте адрес/настройки).";
       if (typeof out.credits === "number") msg += `\nОсталось договоров: ${out.credits}.`;
       else if (out.sub) msg += `\nПодписка активна до ${new Date(out.sub).toLocaleDateString("ru-RU")}.`;
+      // Ссылка второй стороне — открываем окно «Поделиться» в Telegram.
+      if (wantShare && out.shareUrl) {
+        const shareText = "Документы по сделке купли-продажи авто. Откройте ссылку и нажмите «Запустить», чтобы получить файлы:";
+        tg?.openTelegramLink?.("https://t.me/share/url?url=" + encodeURIComponent(out.shareUrl) + "&text=" + encodeURIComponent(shareText));
+        return;
+      }
       tg?.showAlert?.(msg);
       tg?.close?.();
     }
     else tg?.showAlert?.("Не удалось отправить: " + (out.error || "ошибка"));
   } catch (e) { tg?.showAlert?.("Ошибка отправки: " + (e.message || e)); }
-  finally { sb.textContent = "✅ Отправить в чат"; sb.disabled = false; }
+  finally { sb.textContent = "✅ Отправить"; sb.disabled = false; }
 }
 </script>
 </body>
