@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Оформление ДКП</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://widget.cloudpayments.ru/bundles/cloudpayments.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.7/dist/pizzip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.50.0/build/docxtemplater.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/pdfmake.min.js"></script>
@@ -182,7 +181,7 @@ let initData = tg?.initData || "";
 try { if (!initData) initData = sessionStorage.getItem("dkp_initData") || ""; } catch (e) {}
 try { if (initData) sessionStorage.setItem("dkp_initData", initData); } catch (e) {}
 
-/* ---------- Доступ и оплата (CloudPayments) ---------- */
+/* ---------- Доступ и оплата (Tinkoff) ---------- */
 let subCfg = { subEnabled: false, provider: "", cpPublicId: "", tariffs: [] };
 let subIsActive = true;                       // есть доступ: подписка ИЛИ кредит
 let subInfo = { sub: false, credits: 0, until: 0 };
@@ -380,26 +379,7 @@ function restoreForm() {
 function payAndSubscribe(planKey) {
   const t = (subCfg.tariffs || []).find((x) => x.key === planKey);
   if (!t) return;
-  if (subCfg.provider === "tinkoff") return payTinkoff(t);
-  if (!subCfg.cpPublicId || !window.cp) { tg?.showAlert?.("Оплата временно недоступна."); return; }
-  const uid = String(tg?.initDataUnsafe?.user?.id || "");
-  const widget = new cp.CloudPayments();
-  widget.pay("charge", {
-    publicId: subCfg.cpPublicId,
-    description: `ДКП-бот — ${t.title}`,
-    amount: t.price, currency: "RUB",
-    accountId: uid, invoiceId: "dkp-" + uid + "-" + Date.now(),
-    data: { cc: "dkp", plan: t.key },     // метка платежа бота (страховка на стороне воркера)
-    skin: "mini",
-  }, {
-    onSuccess: async () => {
-      tg?.showAlert?.("Оплата прошла, активируем доступ…");
-      for (let i = 0; i < 12 && !subIsActive; i++) { await new Promise((r) => setTimeout(r, 1500)); await loadSub(); }
-      closePaywall();
-      tg?.showAlert?.(subIsActive ? "Доступ открыт! Можно отправить договор." : "Оплата получена. Доступ появится в течение минуты.");
-    },
-    onFail: (reason) => { tg?.showAlert?.("Оплата не завершена: " + (reason || "")); },
-  });
+  return payTinkoff(t);
 }
 
 // Согласие на обработку ПДн обязательно перед загрузкой паспорта/прописки и формированием.
