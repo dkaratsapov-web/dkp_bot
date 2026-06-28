@@ -25,6 +25,10 @@
   .appbar { padding: 14px 16px 16px; margin: -12px -12px 14px;
             background: linear-gradient(135deg, #16243f 0%, #0b0f19 70%);
             border-bottom: 1px solid var(--line); }
+  .backbtn { display: inline-flex; align-items: center; gap: 5px; background: #ffffff14;
+             border: 1px solid var(--line); color: #dce6f5; font-size: 13px; font-weight: 600;
+             padding: 6px 12px 6px 9px; border-radius: 8px; cursor: pointer; margin-bottom: 12px; }
+  .backbtn:active { background: #ffffff26; }
   .brand { display: flex; flex-direction: column; line-height: 1; }
   .brand .b1 { font-size: 10px; font-weight: 700; letter-spacing: 3px; color: #c6d3e6; }
   .brand .b2 { font-size: 19px; font-weight: 800; letter-spacing: 1px; margin-top: 3px; color: #fff; }
@@ -87,13 +91,14 @@
 </head>
 <body>
 <div class="appbar">
+  <button class="backbtn" id="backbtn" onclick="goBack()">‹ Назад</button>
   <div class="brand"><span class="b1">БЕЗОПАСНЫЙ</span><span class="b2">АВТО<b>ДОГОВОР</b></span></div>
   <div class="bar"></div>
   <div class="t1">Договор купли-продажи ТС</div>
-  <div class="t2">фото паспорта и СТС → готовый договор</div>
+  <div class="t2">фото паспорта и СТС → готовый пакет документов</div>
 </div>
 <p class="hint">Выберите тип каждой стороны, загрузите фото (распознается автоматически)
-   или заполните поля вручную, проверьте — и нажмите «Сформировать договор».</p>
+   или заполните поля вручную, проверьте — и нажмите «Сформировать документы».</p>
 
 <label class="consent">
   <input type="checkbox" id="consent" />
@@ -193,6 +198,15 @@ const WORKER = "https://dkp-bot.d-karatsapov.workers.dev";
 let initData = tg?.initData || "";
 try { if (!initData) initData = sessionStorage.getItem("dkp_initData") || ""; } catch (e) {}
 try { if (initData) sessionStorage.setItem("dkp_initData", initData); } catch (e) {}
+
+// Кнопка «Назад»: с открытого экрана — на шаг назад, с главного — закрыть мини-апп (в чат бота).
+function goBack() {
+  const open = (id) => document.getElementById(id)?.style.display === "flex";
+  if (open("preview")) return closePreview();
+  if (open("stats")) return closeStats();
+  if (open("paywall")) return closePaywall();
+  if (tg?.close) tg.close(); else history.back();
+}
 
 /* ---------- Доступ и оплата (Tinkoff) ---------- */
 let subCfg = { subEnabled: false, provider: "", cpPublicId: "", tariffs: [] };
