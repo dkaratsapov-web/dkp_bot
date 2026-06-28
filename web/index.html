@@ -111,15 +111,17 @@
 
 <h2>Автомобиль</h2>
 <div class="card">
-  <div class="file">
-    <button class="btn sec" onclick="document.getElementById('sts-file').click()">📷 СТС — лицевая</button>
-    <span id="sts-status" class="badge"></span>
-    <input type="file" id="sts-file" accept="image/*" />
-  </div>
-  <div class="file">
-    <button class="btn sec" onclick="document.getElementById('stsb-file').click()">📷 СТС — оборот</button>
-    <span id="stsb-status" class="badge"></span>
-    <input type="file" id="stsb-file" accept="image/*" />
+  <div class="row" style="margin:6px 0">
+    <div>
+      <button class="btn sec" style="width:100%" onclick="document.getElementById('sts-file').click()">📷 СТС — лицевая</button>
+      <span id="sts-status" class="badge"></span>
+      <input type="file" id="sts-file" accept="image/*" />
+    </div>
+    <div>
+      <button class="btn sec" style="width:100%" onclick="document.getElementById('stsb-file').click()">📷 СТС — оборот</button>
+      <span id="stsb-status" class="badge"></span>
+      <input type="file" id="stsb-file" accept="image/*" />
+    </div>
   </div>
   <div class="file">
     <button class="btn sec" onclick="document.getElementById('pts-file').click()">📷 Фото ПТС</button>
