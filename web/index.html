@@ -62,6 +62,8 @@
   input, select { width: 100%; padding: 9px 10px; font-size: 15px; border: 1px solid var(--line);
           border-radius: 9px; background: var(--panel2); color: var(--fg); min-height: 40px; }
   input::placeholder { color: #5c6b82; }
+  /* Поле, которое стоит проверить после распознавания */
+  input.warn, select.warn { border-color: #e0a83a; box-shadow: 0 0 0 1px #e0a83a55; background: #1f1b10; }
   /* Нормализация поля даты на мобильных (iOS): высота, выравнивание, иконка календаря */
   input[type="date"] { -webkit-appearance: none; appearance: none; }
   input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
@@ -620,7 +622,17 @@ async function recognize(file, kind, statusEl, applyPrefix) {
       const g = data._gender || (fioEl && detectGender(fioEl.value));
       if (g) setGender(pre, g);
     }
-    statusEl.textContent = `распознано полей: ${n} — проверьте`;
+    // Контроль качества: подсветка подозрительных/нераспознанных полей + подсказка.
+    const warns = data.warnings || [];
+    const keys = new Set([...Object.keys(data.fields || {}), ...warns.map((w) => w.field)]);
+    keys.forEach((k) => { const el = document.getElementById(applyPrefix + k); if (el) el.classList.remove("warn"); });
+    warns.forEach((w) => { const el = document.getElementById(applyPrefix + w.field); if (el) el.classList.add("warn"); });
+    let msg = `распознано полей: ${n}`;
+    if (warns.length) msg += ` · проверьте: ${warns.map((w) => w.label).join(", ")}`;
+    else msg += " — проверьте";
+    if (data.quality === "poor") msg += " · фото нечёткое — переснимите без бликов, ровно сверху";
+    statusEl.textContent = msg;
+    statusEl.style.color = data.quality === "poor" ? "#e0603a" : warns.length ? "#e0a83a" : "";
   } catch (e) { statusEl.textContent = "ошибка распознавания — вручную"; }
 }
 ["seller", "buyer"].forEach((pre) => {

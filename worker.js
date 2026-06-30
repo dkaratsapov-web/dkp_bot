@@ -358,6 +358,54 @@ function datesFromText(t) {
   return out;
 }
 
+/* ---------- Контроль качества распознавания ---------- */
+function isValidDate(s) {
+  const d = parseDMY(s);
+  return !!d && d.mo >= 1 && d.mo <= 12 && d.d >= 1 && d.d <= 31 && d.y >= 1900 && d.y <= 2100;
+}
+const FIELD_LABELS = {
+  fio: "ФИО", birth: "дата рождения", pasp_series: "серия паспорта", pasp_number: "номер паспорта",
+  pasp_issued_by: "кем выдан", pasp_issued_date: "дата выдачи", pasp_code: "код подразделения",
+  address: "адрес", car_brand: "марка/модель", car_vin: "VIN", car_year: "год выпуска",
+  sts_number: "номер СТС", org_name: "наименование", inn: "ИНН", ogrn: "ОГРН",
+};
+// Проверяет распознанные поля по типу документа → {warnings:[{field,label,reason}], quality}.
+// reason: empty (не распозналось) | format (странный формат) | implausible (невозможное значение).
+function validateDoc(kind, f) {
+  f = f || {};
+  const W = [];
+  const add = (field, reason) => W.push({ field, label: FIELD_LABELS[field] || field, reason });
+  const req = (field, ok) => { const v = String(f[field] || "").trim(); if (!v) add(field, "empty"); else if (ok && !ok(v)) add(field, "format"); };
+  const noSp = (v) => v.replace(/\s/g, "");
+  if (kind === "passport") {
+    req("fio", (v) => v.split(/\s+/).filter(Boolean).length >= 2);
+    req("birth", isValidDate);
+    req("pasp_series", (v) => /^\d{4}$/.test(noSp(v)));
+    req("pasp_number", (v) => /^\d{6}$/.test(noSp(v)));
+    req("pasp_issued_by", (v) => v.length >= 6);
+    req("pasp_issued_date", isValidDate);
+    req("pasp_code", (v) => /^\d{3}-?\d{3}$/.test(noSp(v)));
+    if (isValidDate(f.birth) && isValidDate(f.pasp_issued_date) && !plausibleIssue(f.birth, f.pasp_issued_date)
+        && !W.some((w) => w.field === "pasp_issued_date")) add("pasp_issued_date", "implausible");
+  } else if (kind === "reg") {
+    req("address", (v) => v.length >= 8);
+  } else if (kind === "sts") {
+    req("car_brand", (v) => v.length >= 2);
+    req("car_vin", (v) => /^[A-HJ-NPR-Z0-9]{17}$/.test(noSp(v).toUpperCase()));
+    req("car_year", (v) => /^(19|20)\d{2}$/.test(v));
+    req("sts_number", (v) => /^\d{6}$/.test(noSp(v)));
+  } else if (kind === "org_card") {
+    req("org_name", (v) => v.length >= 3);
+    req("inn", (v) => /^(\d{10}|\d{12})$/.test(noSp(v)));
+    req("ogrn", (v) => /^(\d{13}|\d{15})$/.test(noSp(v)));
+  }
+  // sts_back — дополняющий скан, строго не валидируем.
+  const missing = W.filter((w) => w.reason === "empty").length;
+  let quality = "ok";
+  if (W.length) quality = missing >= 3 ? "poor" : "check";
+  return { warnings: W, quality };
+}
+
 function mapPassport(entities, fullText) {
   const m = entMap(entities);
   const last = pick(m, "surname", "last_name");
@@ -959,6 +1007,7 @@ export default {
       const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
       if (!auth.ok) return json({ error: "unauthorized" }, 401);
       const res = await recognize(env, b.image, b.kind);
+      if (!res.error) { const q = validateDoc(b.kind, res.fields); res.warnings = q.warnings; res.quality = q.quality; }
       return json(res, res.error ? 422 : 200);
     }
 
