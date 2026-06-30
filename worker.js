@@ -143,15 +143,9 @@ async function recognize(env, imageDataUrl, kind) {
   const m = /^data:(image\/\w+);base64,(.+)$/s.exec(imageDataUrl || "");
   if (!m) return { error: "bad_image" };
   const [, mediaType, data] = m;
-  // Claude Vision точнее на датах и номерах структурированных документов РФ — предпочитаем его,
-  // если задан ключ. При ошибке — откатываемся на Яндекс OCR (если он настроен).
-  if (env.ANTHROPIC_API_KEY) {
-    const a = await recognizeAnthropic(env, mediaType, data, kind);
-    if (!a.error && a.fields) return a;
-    if (env.YANDEX_API_KEY) return recognizeYandex(env, mediaType, data, kind);
-    return a;
-  }
+  // Основной распознаватель — Яндекс OCR. Claude Vision — только запасной (если ключа Яндекса нет).
   if (env.YANDEX_API_KEY) return recognizeYandex(env, mediaType, data, kind);
+  if (env.ANTHROPIC_API_KEY) return recognizeAnthropic(env, mediaType, data, kind);
   return { error: "no_api_key" };
 }
 
@@ -345,6 +339,25 @@ const pick = (m, ...names) => { for (const n of names) if (m[n]) return m[n]; re
 // «МОКИЕНКО иван» → «Мокиенко Иван»
 const titleCase = (s) => s.toLowerCase().replace(/(^|[\s\-])([^\s\-])/g, (_, p, c) => p + c.toUpperCase());
 
+// Разбор даты ДД.ММ.ГГГГ.
+function parseDMY(s) {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec((s || "").trim());
+  return m ? { d: +m[1], mo: +m[2], y: +m[3] } : null;
+}
+// Правдоподобна ли дата выдачи паспорта: возраст на дату выдачи 14…100 лет (паспорт РФ выдают с 14).
+function plausibleIssue(birth, issue) {
+  const b = parseDMY(birth), i = parseDMY(issue);
+  if (!b || !i) return false;
+  const age = i.y - b.y - (i.mo < b.mo || (i.mo === b.mo && i.d < b.d) ? 1 : 0);
+  return age >= 14 && age <= 100;
+}
+// Все даты ДД.ММ.ГГГГ из текста (терпимо к пробелам вокруг точек/дефисов).
+function datesFromText(t) {
+  const out = []; const re = /(\d{2})\s*[.\-]\s*(\d{2})\s*[.\-]\s*((?:19|20)\d{2})/g; let m;
+  while ((m = re.exec(t || ""))) out.push(`${m[1]}.${m[2]}.${m[3]}`);
+  return out;
+}
+
 function mapPassport(entities, fullText) {
   const m = entMap(entities);
   const last = pick(m, "surname", "last_name");
@@ -385,6 +398,18 @@ function mapPassport(entities, fullText) {
       if (m1) by = m1[1];
     }
     if (by) f.pasp_issued_by = by.replace(/^[\s.,№-]+|[\s.,]+$/g, "").replace(/\s+/g, " ");
+  }
+  // Дата выдачи: OCR иногда путает цифру года (напр. 2022→2012). Сверяем структурную модель
+  // со сплошным текстом и выбираем правдоподобную по дате рождения (паспорт выдают с 14 лет).
+  if (f.birth && fullText) {
+    const T = fullText.replace(/\s+/g, " ");
+    const lm = T.match(/дата\s*выдачи[^0-9]{0,12}(\d{2})\s*[.\-]\s*(\d{2})\s*[.\-]\s*((?:19|20)\d{2})/i);
+    const labeled = lm ? `${lm[1]}.${lm[2]}.${lm[3]}` : "";
+    const ordered = [labeled, f.pasp_issued_date, ...datesFromText(T)].filter(Boolean);
+    if (!plausibleIssue(f.birth, f.pasp_issued_date)) {
+      const good = ordered.find((d) => d !== f.birth && plausibleIssue(f.birth, d));
+      if (good) f.pasp_issued_date = good;
+    }
   }
   return f;
 }
@@ -433,7 +458,12 @@ function fillFromText(f, t) {
   }
   if (!f.sts_series || !f.sts_number) {
     // СТС: «99 серия 87 № 802478» или «99 87 802478» → серия «99 87», номер «802478».
-    const s = T.match(/(\d{2})\s*сери[яи]\s*(\d{2})\s*№?\s*(\d{6})/i) || T.match(/свидетельств\w*[^0-9]{0,40}(\d{2})\s*(\d{2})\s*№?\s*(\d{6})/i);
+    let s = T.match(/(\d{2})\s*сери[яи]\s*(\d{2})\s*№?\s*(\d{6})/i) || T.match(/свидетельств\w*[^0-9]{0,40}(\d{2})\s*(\d{2})\s*№?\s*(\d{6})/i);
+    // Запасной разбор: «красный» номер бланка «NN NN NNNNNN» — берём последнее вхождение (обычно внизу).
+    if (!s) {
+      const all = [...T.matchAll(/\b(\d{2})\s+(\d{2})\s+№?\s*(\d{6})\b/g)];
+      if (all.length) s = all[all.length - 1];
+    }
     if (s) { f.sts_series = `${s[1]} ${s[2]}`; f.sts_number = s[3]; }
   }
   if (!f.pts_series || !f.pts_number) {
