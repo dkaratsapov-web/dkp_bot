@@ -107,12 +107,16 @@ const json = (obj, status = 200) =>
 /* ---------- Claude Vision: распознавание паспорта / СТС ---------- */
 const PROMPTS = {
   passport:
-    "На изображении — разворот паспорта гражданина РФ. Извлеки данные и верни СТРОГО JSON " +
-    "без пояснений с ключами: fio (ФИО полностью), birth (дата рождения ДД.ММ.ГГГГ), " +
-    "birthplace (место рождения), pasp_series (серия, 4 цифры), pasp_number (номер, 6 цифр), " +
-    "pasp_issued_by (кем выдан), pasp_issued_date (дата выдачи ДД.ММ.ГГГГ), pasp_code " +
-    "(код подразделения), address (адрес регистрации, если виден, иначе пустая строка). " +
-    "Если поле не читается — пустая строка.",
+    "На фото — разворот паспорта гражданина РФ (страница с фотографией). Извлеки данные и верни " +
+    "СТРОГО JSON без пояснений с ключами: fio (Фамилия Имя Отчество, с заглавных), " +
+    "gender (пол: «м» или «ж»), birth (дата рождения ДД.ММ.ГГГГ), birthplace (место рождения как в документе), " +
+    "pasp_series (серия — 4 цифры; продублирована вертикально красным справа, формат NN NN), " +
+    "pasp_number (номер — 6 цифр; красным вертикально справа), " +
+    "pasp_issued_by (орган, выдавший паспорт — заголовок сверху, ДОСЛОВНО как напечатано, ЗАГЛАВНЫМИ; ничего не добавляй), " +
+    "pasp_issued_date (дата выдачи ДД.ММ.ГГГГ — слева сверху у надписи «Дата выдачи»; ГОД прочитай ПОСИМВОЛЬНО, " +
+    "не путай цифры 0/1/2 и не подменяй год), pasp_code (код подразделения в формате NNN-NNN, справа сверху у надписи «Код подразделения»), " +
+    "address (если видна страница регистрации — адрес одной строкой, иначе пустая строка). " +
+    "Если поле не читается — пустая строка. Ничего не выдумывай.",
   org_card:
     "На изображении — карточка организации (реквизиты юрлица или ИП). Извлеки данные и верни " +
     "СТРОГО JSON без пояснений с ключами: org_name (полное или краткое наименование, напр. " +
@@ -122,21 +126,32 @@ const PROMPTS = {
     "действует: «Устава» для ООО или «свидетельства о государственной регистрации» для ИП), " +
     "address (юридический/почтовый адрес). Если поле не читается — пустая строка.",
   sts:
-    "На изображении — свидетельство о регистрации ТС (СТС) РФ. Извлеки данные и верни СТРОГО " +
-    "JSON без пояснений с ключами: car_brand (марка, модель), car_vin (VIN), car_type (тип ТС), " +
-    "car_category (категория), car_year (год выпуска), car_engine (модель и № двигателя), " +
-    "car_chassis (шасси/рама №), car_body (кузов №), car_color (цвет), car_power (мощность л.с.), " +
-    "car_volume (рабочий объём, куб.см), car_plate (госномер), pts_series (серия ПТС), " +
-    "pts_number (номер ПТС), sts_series (серия СТС), sts_number (номер СТС). " +
-    "Если поле не читается — пустая строка.",
+    "На фото — свидетельство о регистрации ТС (СТС) РФ. Извлеки данные и верни СТРОГО JSON " +
+    "без пояснений с ключами: car_brand (поле «Марка, модель» ДОСЛОВНО как в документе, одной строкой, " +
+    "ЗАГЛАВНЫМИ; не переводи и не сокращай), car_vin (VIN, 17 символов, латиница/цифры), " +
+    "car_type (тип ТС, напр. «Легковой седан»), car_category (буква категории до «/», напр. из «B/M1» → «B»), " +
+    "car_year (год выпуска ТС, 4 цифры — НЕ путать с датой выдачи документа), car_engine (модель и № двигателя), " +
+    "car_chassis (шасси/рама №; может быть «ОТСУТСТВУЕТ»), car_body (кузов №), car_color (цвет), " +
+    "car_power (мощность в л.с.), car_volume (рабочий объём, куб.см), car_plate (госномер), " +
+    "pts_series (серия ПТС, напр. «16РС»), pts_number (номер ПТС, 6 цифр), " +
+    "sts_series (серия СТС — 4 знака; напечатана КРАСНЫМ внизу бланка, формат NN NN), " +
+    "sts_number (номер СТС — 6 цифр; КРАСНЫМ внизу, сразу после серии). " +
+    "Если поле не читается — пустая строка. Ничего не выдумывай.",
 };
 
 async function recognize(env, imageDataUrl, kind) {
   const m = /^data:(image\/\w+);base64,(.+)$/s.exec(imageDataUrl || "");
   if (!m) return { error: "bad_image" };
   const [, mediaType, data] = m;
+  // Claude Vision точнее на датах и номерах структурированных документов РФ — предпочитаем его,
+  // если задан ключ. При ошибке — откатываемся на Яндекс OCR (если он настроен).
+  if (env.ANTHROPIC_API_KEY) {
+    const a = await recognizeAnthropic(env, mediaType, data, kind);
+    if (!a.error && a.fields) return a;
+    if (env.YANDEX_API_KEY) return recognizeYandex(env, mediaType, data, kind);
+    return a;
+  }
   if (env.YANDEX_API_KEY) return recognizeYandex(env, mediaType, data, kind);
-  if (env.ANTHROPIC_API_KEY) return recognizeAnthropic(env, mediaType, data, kind);
   return { error: "no_api_key" };
 }
 
@@ -508,7 +523,25 @@ async function recognizeAnthropic(env, mediaType, data, kind) {
   const text = (out.content || []).map((c) => c.text || "").join("");
   try {
     const jsonText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-    return { fields: JSON.parse(jsonText) };
+    const raw = JSON.parse(jsonText);
+    // Пол — только для паспорта; в поля ДКП не кладём.
+    let _gender;
+    if (kind === "passport") {
+      const g = String(raw.gender || "").toLowerCase();
+      if (/^[мm]/.test(g)) _gender = "m"; else if (/^[жf]/.test(g)) _gender = "f";
+    }
+    delete raw.gender;
+    // Оставляем только непустые значения; нормализуем VIN/кузов/шасси к верхнему регистру.
+    const fields = {};
+    for (const k in raw) {
+      let v = raw[k];
+      if (typeof v === "number") v = String(v);
+      if (typeof v !== "string" || !v.trim()) continue;
+      v = v.trim();
+      if (k === "car_vin" || k === "car_body" || k === "car_chassis") v = v.toUpperCase();
+      fields[k] = v;
+    }
+    return { fields, _gender };
   } catch {
     return { error: "parse_failed", raw: text };
   }
