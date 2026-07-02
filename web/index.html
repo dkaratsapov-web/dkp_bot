@@ -168,6 +168,11 @@
   <label class="doc-opt"><input type="checkbox" id="doc_spouse" onchange="toggleDoc('spouse')" /> <span>Согласие супруга на продажу <span class="tag">(PDF)</span></span></label>
   <div class="doc-extra" id="extra_spouse">
     <p class="hint" style="margin:0 0 4px">Данные супруга(и) Продавца, дающего согласие.</p>
+    <div class="file" style="margin:2px 0 6px">
+      <button class="btn sec" onclick="document.getElementById('sp-pfile').click()">📷 Фото паспорта</button>
+      <span id="sp-status" class="badge"></span>
+      <input type="file" id="sp-pfile" accept="image/*" />
+    </div>
     <label>ФИО супруга(и)</label><input id="sp_fio" placeholder="Иванова Мария Петровна" />
     <div class="row">
       <div><label>Дата рождения</label><input id="sp_birth" placeholder="01.01.1985" /></div>
@@ -184,6 +189,11 @@
   <label class="doc-opt"><input type="checkbox" id="doc_dov" onchange="toggleDoc('dov')" /> <span>Доверенность на постановку на учёт <span class="tag">(PDF)</span></span></label>
   <div class="doc-extra" id="extra_dov">
     <p class="hint" style="margin:0 0 4px">Доверитель — Покупатель (новый собственник). Укажите поверенного.</p>
+    <div class="file" style="margin:2px 0 6px">
+      <button class="btn sec" onclick="document.getElementById('dov-pfile').click()">📷 Фото паспорта</button>
+      <span id="dov-status" class="badge"></span>
+      <input type="file" id="dov-pfile" accept="image/*" />
+    </div>
     <label>ФИО поверенного</label><input id="dov_fio" placeholder="Сидоров Иван Алексеевич" />
     <div class="row">
       <div><label>Дата рождения</label><input id="dov_birth" placeholder="01.01.1990" /></div>
@@ -658,6 +668,51 @@ document.getElementById("sts-file").addEventListener("change", (e) => {
 document.getElementById("stsb-file").addEventListener("change", (e) => {
   if (e.target.files[0]) recognize(e.target.files[0], "sts_back",
     document.getElementById("stsb-status"), "");
+});
+
+// Распознавание паспорта в компактные блоки (супруг / поверенный): серию и номер объединяем в одно поле.
+async function recognizePassportInto(file, statusEl, ids) {
+  statusEl.textContent = "распознаю…"; statusEl.style.color = "";
+  try {
+    const image = await fileToDataUrl(file);
+    const r = await fetch(WORKER + "/api/recognize", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData: initData, image, kind: "passport" }),
+    });
+    const data = await r.json();
+    if (data.error) {
+      statusEl.textContent = data.error === "no_api_key" ? "авто-распознавание выключено — вручную" : "ошибка распознавания — вручную";
+      return;
+    }
+    const f = data.fields || {};
+    const set = (id, v) => { if (id && v) { const el = document.getElementById(id); if (el) { el.value = v; return true; } } return false; };
+    let n = 0;
+    if (set(ids.fio, f.fio)) n++;
+    if (set(ids.birth, f.birth)) n++;
+    const pasp = [f.pasp_series, f.pasp_number].filter(Boolean).join(" ");
+    if (set(ids.pasp, pasp)) n++;
+    if (set(ids.by, f.pasp_issued_by)) n++;
+    if (set(ids.date, f.pasp_issued_date)) n++;
+    if (set(ids.code, f.pasp_code)) n++;
+    if (set(ids.addr, f.address)) n++;
+    const warns = data.warnings || [];
+    let msg = `распознано полей: ${n}`;
+    if (warns.length) msg += ` · проверьте: ${warns.map((w) => w.label).join(", ")}`;
+    else msg += " — проверьте";
+    if (data.quality === "poor") msg += " · фото нечёткое — переснимите без бликов";
+    statusEl.textContent = msg;
+    statusEl.style.color = data.quality === "poor" ? "#e0603a" : warns.length ? "#e0a83a" : "";
+  } catch (e) { statusEl.textContent = "ошибка распознавания — вручную"; }
+}
+document.getElementById("sp-pfile").addEventListener("change", (e) => {
+  if (!consentOk()) { e.target.value = ""; return; }
+  if (e.target.files[0]) recognizePassportInto(e.target.files[0], document.getElementById("sp-status"),
+    { fio: "sp_fio", birth: "sp_birth", pasp: "sp_pasp", by: "sp_by", date: "sp_date", code: "sp_code", addr: "sp_addr" });
+});
+document.getElementById("dov-pfile").addEventListener("change", (e) => {
+  if (!consentOk()) { e.target.value = ""; return; }
+  if (e.target.files[0]) recognizePassportInto(e.target.files[0], document.getElementById("dov-status"),
+    { fio: "dov_fio", birth: "dov_birth", pasp: "dov_pasp", by: "dov_by", date: "dov_date", code: "dov_code", addr: "dov_addr" });
 });
 document.getElementById("pts-file").addEventListener("change", (e) => {
   if (e.target.files[0]) recognize(e.target.files[0], "pts",
