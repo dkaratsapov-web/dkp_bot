@@ -103,6 +103,7 @@
 </div>
 <p class="hint">Выберите тип каждой стороны, загрузите фото (распознается автоматически)
    или заполните поля вручную, проверьте — и нажмите «Сформировать документы».</p>
+<div style="margin:0 0 12px"><button class="btn sec" style="font-size:13px" onclick="openDrafts()">📁 Мои черновики</button></div>
 
 <label class="consent">
   <input type="checkbox" id="consent" />
@@ -139,11 +140,11 @@
 <h2>Сделка</h2>
 <div class="card">
   <div class="row">
-    <div><label>Город</label><input id="city" placeholder="Тверь" /></div>
+    <div><label>Город</label><input id="city" placeholder="Москва" value="Москва" /></div>
     <div><label>Дата</label><input id="dealdate" type="date" /></div>
   </div>
   <label>Цена, ₽ (цифрами)</label>
-  <input id="price_num" inputmode="numeric" placeholder="1850000" oninput="updatePriceWords()" />
+  <input id="price_num" inputmode="numeric" placeholder="1 850 000" oninput="onPriceInput()" />
   <label>Прописью (можно поправить)</label>
   <input id="price_words" placeholder="Один миллион восемьсот пятьдесят тысяч" />
 </div>
@@ -236,6 +237,14 @@
   <div id="statsBody" style="flex:1;overflow:auto;padding:14px"></div>
 </div>
 
+<div id="drafts" style="display:none;position:fixed;inset:0;z-index:70;background:var(--bg);flex-direction:column">
+  <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
+    <b style="flex:1;font-size:16px">📁 Мои черновики</b>
+    <button class="btn sec" onclick="closeDrafts()">Закрыть</button>
+  </div>
+  <div id="draftsBody" style="flex:1;overflow:auto;padding:14px"></div>
+</div>
+
 <div id="preview" style="display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column">
   <div style="padding:10px 12px;border-bottom:1px solid #0002">
     <b style="font-size:15px">Предпросмотр документов</b>
@@ -266,13 +275,15 @@ let initData = tg?.initData || "";
 try { if (!initData) initData = sessionStorage.getItem("dkp_initData") || ""; } catch (e) {}
 try { if (initData) sessionStorage.setItem("dkp_initData", initData); } catch (e) {}
 
-// Кнопка «Назад»: с открытого экрана — на шаг назад, с главного — закрыть мини-апп (в чат бота).
+// Кнопка «Назад»: с открытого экрана — на шаг назад; с главного — экран тарифов/старт
+// (мини-апп НЕ закрываем; вернуться к форме можно кнопкой «Продолжить →»/«Закрыть»).
 function goBack() {
   const open = (id) => document.getElementById(id)?.style.display === "flex";
   if (open("preview")) return closePreview();
+  if (open("drafts")) return closeDrafts();
   if (open("stats")) return closeStats();
   if (open("paywall")) return closePaywall();
-  if (tg?.close) tg.close(); else history.back();
+  openPaywall();
 }
 
 // Раскрытие доп. полей документа при отметке галочки.
@@ -456,27 +467,87 @@ async function payTinkoff(t) {
   } catch (e) { tg?.showAlert?.("Ошибка оплаты: " + (e.message || e)); }
 }
 // Сохранение/восстановление формы при уходе на оплату и возврате.
-function saveForm() {
-  try {
-    const d = { __type: partyType, __gender: partyGender };
-    document.querySelectorAll("input, select").forEach((el) => {
-      if (!el.id) return; d[el.id] = el.type === "checkbox" ? el.checked : el.value;
-    });
-    sessionStorage.setItem("dkp_form", JSON.stringify(d));
-  } catch (e) {}
+// Полное состояние формы (для черновиков и сохранения при оплате).
+function formState() {
+  const d = { __type: { ...partyType }, __gender: { ...partyGender } };
+  document.querySelectorAll("input, select").forEach((el) => {
+    if (!el.id) return; d[el.id] = el.type === "checkbox" ? el.checked : el.value;
+  });
+  return d;
 }
+function applyState(d) {
+  if (!d) return;
+  if (d.__type) { setType("seller", d.__type.seller || "person"); setType("buyer", d.__type.buyer || "person"); }
+  if (d.__gender) { setGender("seller", d.__gender.seller || "m"); setGender("buyer", d.__gender.buyer || "m"); }
+  document.querySelectorAll("input, select").forEach((el) => {
+    if (el.id && el.id in d) { if (el.type === "checkbox") el.checked = d[el.id]; else el.value = d[el.id]; }
+  });
+  syncDocToggles();
+}
+function saveForm() { try { sessionStorage.setItem("dkp_form", JSON.stringify(formState())); } catch (e) {} }
 function restoreForm() {
   try {
     const raw = sessionStorage.getItem("dkp_form"); if (!raw) return;
-    const d = JSON.parse(raw);
-    if (d.__type) { setType("seller", d.__type.seller || "person"); setType("buyer", d.__type.buyer || "person"); }
-    if (d.__gender) { setGender("seller", d.__gender.seller || "m"); setGender("buyer", d.__gender.buyer || "m"); }
-    document.querySelectorAll("input, select").forEach((el) => {
-      if (el.id && el.id in d) { if (el.type === "checkbox") el.checked = d[el.id]; else el.value = d[el.id]; }
-    });
-    syncDocToggles();
+    applyState(JSON.parse(raw));
     sessionStorage.removeItem("dkp_form");
   } catch (e) {}
+}
+
+/* ---------- Черновики (сервер, KV) ---------- */
+let currentDraftId = null;
+async function draftsApi(action, extra) {
+  try {
+    const r = await fetch(WORKER + "/api/drafts", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData, action, ...(extra || {}) }),
+    });
+    return await r.json();
+  } catch (e) { return { error: "network" }; }
+}
+function draftName() {
+  const brand = (document.getElementById("car_brand")?.value || "").trim();
+  const seller = (document.getElementById("seller_fio")?.value || document.getElementById("seller_org_name")?.value || "").trim().split(/\s+/).slice(0, 2).join(" ");
+  return [brand || "Договор", seller].filter(Boolean).join(" · ").slice(0, 60);
+}
+// Автосохранение черновика (после формирования документов). Не блокирует поток.
+async function saveDraft() {
+  try {
+    const res = await draftsApi("save", { id: currentDraftId, name: draftName(), data: formState() });
+    if (res && res.id) currentDraftId = res.id;
+    return res;
+  } catch (e) { return { error: "save_failed" }; }
+}
+function openDrafts() { document.getElementById("drafts").style.display = "flex"; renderDrafts(); }
+function closeDrafts() { document.getElementById("drafts").style.display = "none"; }
+async function renderDrafts() {
+  const body = document.getElementById("draftsBody");
+  body.innerHTML = "<p class='hint'>Загрузка…</p>";
+  const d = await draftsApi("list");
+  if (!d || !d.ok) { body.innerHTML = "<p class='hint'>Не удалось загрузить черновики.</p>"; return; }
+  if (!d.drafts.length) { body.innerHTML = "<p class='hint'>Черновиков пока нет. Они сохраняются автоматически после нажатия «Сформировать документы».</p>"; return; }
+  body.innerHTML = d.drafts.map((x) => {
+    const dt = x.updated ? new Date(x.updated).toLocaleString("ru-RU") : "";
+    return `<div class="card" style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-word">${esc(x.name)}</div><div class="hint" style="margin:2px 0 0">${esc(dt)}</div></div>
+      <button class="btn" onclick="loadDraft('${esc(x.id)}')">Открыть</button>
+      <button class="btn sec" onclick="deleteDraft('${esc(x.id)}')">🗑</button>
+    </div>`;
+  }).join("");
+}
+async function loadDraft(id) {
+  const d = await draftsApi("get", { id });
+  if (!d || !d.ok) { tg?.showAlert?.("Не удалось открыть черновик."); return; }
+  applyState(d.data);
+  currentDraftId = id;
+  closeDrafts();
+  tg?.showAlert?.("Черновик загружен — можно редактировать.");
+}
+async function deleteDraft(id) {
+  const ok = await new Promise((r) => tg?.showConfirm ? tg.showConfirm("Удалить черновик?", r) : r(confirm("Удалить черновик?")));
+  if (!ok) return;
+  await draftsApi("delete", { id });
+  if (currentDraftId === id) currentDraftId = null;
+  renderDrafts();
 }
 function payAndSubscribe(planKey) {
   const t = (subCfg.tariffs || []).find((x) => x.key === planKey);
@@ -745,9 +816,14 @@ function plural(n, a, b, c) {
   n = Math.abs(n) % 100; const n1 = n % 10;
   if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c;
 }
-function updatePriceWords() {
-  document.getElementById("price_words").value = numToWords(document.getElementById("price_num").value);
+// Ввод цены: разряды по 3 цифры через пробел + пропись.
+function onPriceInput() {
+  const el = document.getElementById("price_num");
+  const digits = el.value.replace(/\D/g, "");
+  el.value = digits.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  document.getElementById("price_words").value = numToWords(digits);
 }
+function updatePriceWords() { onPriceInput(); }
 
 /* ---------- сбор данных под шаблон ---------- */
 function val(id) { const e = document.getElementById(id); return e ? e.value.trim() : ""; }
@@ -1106,6 +1182,9 @@ async function generate() {
     if (dovBuf) gen.extras.push({ filename: "Доверенность.pdf", caption: "📄 Доверенность (PDF)", buf: dovBuf });
     const parts = ["Договор (DOCX + PDF)", ...gen.extras.map((x) => x.caption.replace(/^📄 | \(PDF\)$/g, ""))];
     document.getElementById("pkgNote").textContent = "В чат придёт: " + parts.join(", ") + ".";
+    // Автосохранение черновика — можно вернуться и отредактировать позже.
+    const dr = await saveDraft();
+    if (dr && dr.ok) document.getElementById("pkgNote").textContent += " · черновик сохранён (📁 Мои черновики)";
   } catch (e) { if (e !== 0) tg?.showAlert?.("Ошибка: " + (e.message || e)); }
   finally { btn.textContent = "Сформировать документы"; btn.disabled = false; }
 }
