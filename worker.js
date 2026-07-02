@@ -1011,6 +1011,42 @@ export default {
       return json(res, res.error ? 422 : 200);
     }
 
+    // Черновики договора (KV: draft:<uid>:<id>, метаданные {name, updated}).
+    if (url.pathname === "/api/drafts" && request.method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const auth = await verifyInitData(b.initData, env.TELEGRAM_BOT_TOKEN);
+      if (!auth.ok) return json({ error: "unauthorized" }, 401);
+      if (!env.SUBS) return json({ error: "no_kv" }, 400);
+      const pfx = `draft:${auth.user.id}:`;
+      if (b.action === "list") {
+        const keys = await kvListAll(env, pfx);
+        const drafts = keys.map((k) => ({
+          id: k.name.slice(pfx.length),
+          name: (k.metadata && k.metadata.name) || "Черновик",
+          updated: (k.metadata && k.metadata.updated) || 0,
+        })).sort((a, c) => c.updated - a.updated);
+        return json({ ok: true, drafts });
+      }
+      if (b.action === "save") {
+        const id = (typeof b.id === "string" && /^[a-z0-9]{1,32}$/i.test(b.id)) ? b.id : crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+        const data = JSON.stringify(b.data || {});
+        if (data.length > 80000) return json({ error: "too_big" }, 413);
+        const name = String(b.name || "Черновик").slice(0, 60);
+        await env.SUBS.put(pfx + id, data, { metadata: { name, updated: Date.now() }, expirationTtl: 180 * 24 * 3600 });
+        return json({ ok: true, id });
+      }
+      if (b.action === "get") {
+        const raw = await env.SUBS.get(pfx + String(b.id || ""));
+        if (!raw) return json({ error: "not_found" }, 404);
+        return json({ ok: true, data: JSON.parse(raw) });
+      }
+      if (b.action === "delete") {
+        await env.SUBS.delete(pfx + String(b.id || ""));
+        return json({ ok: true });
+      }
+      return json({ error: "bad_action" }, 400);
+    }
+
     // Публичный конфиг для мини-аппа (Public ID, тарифы, включён ли платный режим)
     if (url.pathname === "/api/config") {
       return json({
