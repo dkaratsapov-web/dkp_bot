@@ -556,12 +556,30 @@ async function renderDrafts() {
   if (!d.drafts.length) { body.innerHTML = "<p class='hint'>Черновиков пока нет. Они сохраняются автоматически после нажатия «Сформировать документы».</p>"; return; }
   body.innerHTML = d.drafts.map((x) => {
     const dt = x.updated ? new Date(x.updated).toLocaleString("ru-RU") : "";
-    return `<div class="card" style="display:flex;align-items:center;gap:8px">
-      <div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-word">${esc(x.name)}</div><div class="hint" style="margin:2px 0 0">${esc(dt)}</div></div>
+    return `<div class="card" id="draft-${esc(x.id)}" style="display:flex;align-items:center;gap:6px">
+      <div style="flex:1;min-width:0"><div class="d-name" style="font-weight:600;word-break:break-word">${esc(x.name)}</div><div class="hint" style="margin:2px 0 0">${esc(dt)}</div></div>
+      <button class="btn sec" title="Переименовать" onclick="startRename('${esc(x.id)}')">✏️</button>
       <button class="btn" onclick="loadDraft('${esc(x.id)}')">Открыть</button>
       <button class="btn sec" onclick="deleteDraft('${esc(x.id)}')">🗑</button>
     </div>`;
   }).join("");
+}
+// Inline-переименование черновика.
+function startRename(id) {
+  const row = document.getElementById("draft-" + id);
+  if (!row) return;
+  const cur = row.querySelector(".d-name")?.textContent || "";
+  row.innerHTML = `<input id="rn-${esc(id)}" style="flex:1;min-width:0" maxlength="60" />
+    <button class="btn" onclick="saveRename('${esc(id)}')">✓</button>
+    <button class="btn sec" onclick="renderDrafts()">✕</button>`;
+  const el = document.getElementById("rn-" + id);
+  if (el) { el.value = cur; el.focus(); }
+}
+async function saveRename(id) {
+  const el = document.getElementById("rn-" + id);
+  const name = (el?.value || "").trim() || "Черновик";
+  await draftsApi("rename", { id, name });
+  renderDrafts();
 }
 async function loadDraft(id) {
   const d = await draftsApi("get", { id });
