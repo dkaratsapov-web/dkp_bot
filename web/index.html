@@ -257,13 +257,17 @@
     <b style="font-size:15px">Предпросмотр документов</b>
     <div id="pkgNote" class="hint" style="margin:4px 0 0"></div>
   </div>
-  <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea">
-    <div id="previewBody" style="padding:12px"></div>
-    <div style="background:var(--bg);border-top:1px solid #0002;padding:10px 12px 14px">
-      <div class="hint" style="margin:0 0 4px">Куда отправить:</div>
-      <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_me" checked /> <span>Мне в чат с ботом</span></label>
+  <div id="previewBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea;padding:12px"></div>
+  <div style="border-top:1px solid #0002">
+    <button type="button" onclick="toggleDelivery()" style="width:100%;background:transparent;border:none;color:var(--fg);padding:10px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+      <span class="hint" style="margin:0">Куда отправить:</span>
+      <span id="dlvSummary" style="flex:1;text-align:left">Мне в чат с ботом</span>
+      <span id="dlvCaret" class="hint" style="margin:0">▾</span>
+    </button>
+    <div id="dlvOptions" style="display:none;padding:0 12px 6px">
+      <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_me" checked onchange="updateDlvSummary()" /> <span>Мне в чат с ботом</span></label>
       <label class="doc-opt" style="padding:5px 0;opacity:.55"><input type="checkbox" id="dlv_email" disabled /> <span>На электронную почту <span class="tag">(скоро)</span></span></label>
-      <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_share" /> <span>Ссылка второй стороне (Telegram)</span></label>
+      <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_share" onchange="updateDlvSummary()" /> <span>Ссылка второй стороне (Telegram)</span></label>
     </div>
   </div>
   <div style="padding:8px 12px;display:flex;gap:8px;border-top:1px solid #0002">
@@ -553,6 +557,7 @@ async function renderDrafts() {
   body.innerHTML = "<p class='hint'>Загрузка…</p>";
   const d = await draftsApi("list");
   if (!d || !d.ok) { body.innerHTML = "<p class='hint'>Не удалось загрузить черновики.</p>"; return; }
+  if (Array.isArray(d.drafts)) d.drafts = d.drafts.filter((x) => !_deletedDrafts.has(x.id));
   if (!d.drafts.length) { body.innerHTML = "<p class='hint'>Черновиков пока нет. Они сохраняются автоматически после нажатия «Сформировать документы».</p>"; return; }
   body.innerHTML = d.drafts.map((x) => {
     const dt = x.updated ? new Date(x.updated).toLocaleString("ru-RU") : "";
@@ -589,12 +594,19 @@ async function loadDraft(id) {
   closeDrafts();
   tg?.showAlert?.("Черновик загружен — можно редактировать.");
 }
+// Множество удалённых черновиков — чтобы список KV (обновляется с задержкой) не показывал их снова.
+const _deletedDrafts = new Set();
 async function deleteDraft(id) {
   const ok = await new Promise((r) => tg?.showConfirm ? tg.showConfirm("Удалить черновик?", r) : r(confirm("Удалить черновик?")));
   if (!ok) return;
-  await draftsApi("delete", { id });
+  // Сразу убираем из интерфейса (KV-список обновляется не мгновенно).
+  _deletedDrafts.add(id);
+  document.getElementById("draft-" + id)?.remove();
   if (currentDraftId === id) currentDraftId = null;
-  renderDrafts();
+  const body = document.getElementById("draftsBody");
+  if (body && !body.querySelector(".card")) body.innerHTML = "<p class='hint'>Черновиков пока нет.</p>";
+  const res = await draftsApi("delete", { id });
+  if (!res || !res.ok) { _deletedDrafts.delete(id); tg?.showAlert?.("Не удалось удалить черновик."); renderDrafts(); }
 }
 function payAndSubscribe(planKey) {
   const t = (subCfg.tariffs || []).find((x) => x.key === planKey);
@@ -1210,6 +1222,9 @@ async function generate() {
     if (wantDov) previewHtml += dovHtml(data);
     document.getElementById("previewBody").innerHTML = previewHtml;
     tg?.expand?.();
+    document.getElementById("dlvOptions").style.display = "none";
+    document.getElementById("dlvCaret").textContent = "▾";
+    updateDlvSummary();
     document.getElementById("preview").style.display = "flex";
     document.getElementById("previewBody").scrollTop = 0;
     const [docxBuf, pdfBuf, actBuf, rasBuf, gibddBuf, spouseBuf, dovBuf] = await Promise.all([
@@ -1238,6 +1253,19 @@ async function generate() {
 }
 function closePreview() {
   document.getElementById("preview").style.display = "none";
+}
+// Выпадающее меню «Куда отправить» (закреплено внизу предпросмотра).
+function toggleDelivery() {
+  const o = document.getElementById("dlvOptions");
+  const isOpen = o.style.display !== "none";
+  o.style.display = isOpen ? "none" : "block";
+  document.getElementById("dlvCaret").textContent = isOpen ? "▾" : "▴";
+}
+function updateDlvSummary() {
+  const parts = [];
+  if (document.getElementById("dlv_me")?.checked) parts.push("Мне в чат");
+  if (document.getElementById("dlv_share")?.checked) parts.push("ссылка второй стороне");
+  document.getElementById("dlvSummary").textContent = parts.length ? parts.join(", ") : "не выбрано";
 }
 // Экран результата: ссылка второй стороне (переслать / скопировать).
 let _shareUrl = "";
