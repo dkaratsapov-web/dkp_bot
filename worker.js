@@ -1040,6 +1040,14 @@ export default {
         if (!raw) return json({ error: "not_found" }, 404);
         return json({ ok: true, data: JSON.parse(raw) });
       }
+      if (b.action === "rename") {
+        const key = pfx + String(b.id || "");
+        const raw = await env.SUBS.get(key);
+        if (raw === null) return json({ error: "not_found" }, 404);
+        const name = String(b.name || "Черновик").slice(0, 60);
+        await env.SUBS.put(key, raw, { metadata: { name, updated: Date.now() }, expirationTtl: 180 * 24 * 3600 });
+        return json({ ok: true });
+      }
       if (b.action === "delete") {
         await env.SUBS.delete(pfx + String(b.id || ""));
         return json({ ok: true });
