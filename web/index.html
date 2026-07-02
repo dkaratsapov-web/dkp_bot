@@ -257,17 +257,31 @@
     <b style="font-size:15px">Предпросмотр документов</b>
     <div id="pkgNote" class="hint" style="margin:4px 0 0"></div>
   </div>
-  <div id="previewBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea;padding:12px"></div>
-  <div style="padding:8px 12px 0;border-top:1px solid #0002">
-    <div class="hint" style="margin:0 0 4px">Куда отправить:</div>
-    <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_me" checked /> <span>Мне в чат с ботом</span></label>
-    <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_email" onchange="document.getElementById('extra_email').classList.toggle('on', this.checked)" /> <span>На электронную почту</span></label>
-    <div class="doc-extra" id="extra_email"><input id="email_to" type="email" inputmode="email" autocomplete="email" placeholder="email@example.com" /></div>
-    <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_share" /> <span>Ссылка второй стороне (Telegram)</span></label>
+  <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#e9e9ea">
+    <div id="previewBody" style="padding:12px"></div>
+    <div style="background:var(--bg);border-top:1px solid #0002;padding:10px 12px 14px">
+      <div class="hint" style="margin:0 0 4px">Куда отправить:</div>
+      <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_me" checked /> <span>Мне в чат с ботом</span></label>
+      <label class="doc-opt" style="padding:5px 0;opacity:.55"><input type="checkbox" id="dlv_email" disabled /> <span>На электронную почту <span class="tag">(скоро)</span></span></label>
+      <label class="doc-opt" style="padding:5px 0"><input type="checkbox" id="dlv_share" /> <span>Ссылка второй стороне (Telegram)</span></label>
+    </div>
   </div>
-  <div style="padding:8px 12px;display:flex;gap:8px">
+  <div style="padding:8px 12px;display:flex;gap:8px;border-top:1px solid #0002">
     <button class="btn sec" style="flex:1" onclick="closePreview()">✏️ Изменить</button>
     <button class="btn" style="flex:2" id="sendBtn" onclick="sendGenerated()">✅ Отправить</button>
+  </div>
+</div>
+
+<div id="shareResult" style="display:none;position:fixed;inset:0;z-index:80;background:var(--bg);flex-direction:column">
+  <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
+    <b style="flex:1;font-size:16px">🔗 Ссылка второй стороне</b>
+    <button class="btn sec" onclick="closeShare()">Закрыть</button>
+  </div>
+  <div style="flex:1;overflow:auto;padding:16px">
+    <p class="hint" style="margin:0 0 12px">Отправьте эту ссылку второй стороне сделки. Когда она откроет ссылку в Telegram и нажмёт «Запустить» — бот пришлёт ей все документы. Ссылка действует 7 дней.</p>
+    <div id="shareLinkBox" style="word-break:break-all;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;margin-bottom:14px"></div>
+    <button class="btn" style="width:100%;padding:13px;margin-bottom:8px" onclick="shareForward()">📨 Переслать в Telegram</button>
+    <button class="btn sec" style="width:100%;padding:13px" id="shareCopyBtn" onclick="shareCopy(this)">📋 Скопировать ссылку</button>
   </div>
 </div>
 
@@ -286,6 +300,7 @@ try { if (initData) sessionStorage.setItem("dkp_initData", initData); } catch (e
 // (мини-апп НЕ закрываем; вернуться к форме можно кнопкой «Продолжить →»/«Закрыть»).
 function goBack() {
   const open = (id) => document.getElementById(id)?.style.display === "flex";
+  if (open("shareResult")) return closeShare();
   if (open("preview")) return closePreview();
   if (open("drafts")) return closeDrafts();
   if (open("stats")) return closeStats();
@@ -1176,6 +1191,7 @@ async function generate() {
     if (wantSpouse) previewHtml += spouseHtml(data);
     if (wantDov) previewHtml += dovHtml(data);
     document.getElementById("previewBody").innerHTML = previewHtml;
+    tg?.expand?.();
     document.getElementById("preview").style.display = "flex";
     document.getElementById("previewBody").scrollTop = 0;
     const [docxBuf, pdfBuf, actBuf, rasBuf, gibddBuf, spouseBuf, dovBuf] = await Promise.all([
@@ -1204,6 +1220,27 @@ async function generate() {
 }
 function closePreview() {
   document.getElementById("preview").style.display = "none";
+}
+// Экран результата: ссылка второй стороне (переслать / скопировать).
+let _shareUrl = "";
+function openShareResult(url) {
+  _shareUrl = url;
+  document.getElementById("shareLinkBox").textContent = url;
+  document.getElementById("shareResult").style.display = "flex";
+}
+function closeShare() { document.getElementById("shareResult").style.display = "none"; }
+function shareForward() {
+  const t = "Документы по сделке купли-продажи авто. Откройте ссылку и нажмите «Запустить», чтобы получить файлы:";
+  tg?.openTelegramLink?.("https://t.me/share/url?url=" + encodeURIComponent(_shareUrl) + "&text=" + encodeURIComponent(t));
+}
+async function shareCopy(btn) {
+  const done = () => { if (btn) { btn.textContent = "✓ Скопировано"; setTimeout(() => btn.textContent = "📋 Скопировать ссылку", 1500); } };
+  try { await navigator.clipboard.writeText(_shareUrl); done(); return; } catch (e) {}
+  try {
+    const ta = document.createElement("textarea"); ta.value = _shareUrl;
+    ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); document.body.removeChild(ta); done();
+  } catch (e) { tg?.showAlert?.("Скопируйте ссылку вручную."); }
 }
 async function sendGenerated() {
   // Платный режим: без активного доступа — показываем виды оплаты.
@@ -1236,21 +1273,20 @@ async function sendGenerated() {
     const out = await r.json();
     if (out.ok) {
       closePreview();
-      let msg = "Готово!";
-      if (toMe) msg += " Документы отправлены в чат.";
-      if (wantEmail) msg += out.emailSent ? `\nПисьмо отправлено на ${email}.` : "\nНа почту отправить не удалось (проверьте адрес/настройки).";
-      if (typeof out.credits === "number") msg += `\nОсталось договоров: ${out.credits}.`;
-      else if (out.sub) msg += `\nПодписка активна до ${new Date(out.sub).toLocaleDateString("ru-RU")}.`;
-      // Ссылка второй стороне — открываем окно «Поделиться» в Telegram.
-      if (wantShare && out.shareUrl) {
-        const shareText = "Документы по сделке купли-продажи авто. Откройте ссылку и нажмите «Запустить», чтобы получить файлы:";
-        tg?.openTelegramLink?.("https://t.me/share/url?url=" + encodeURIComponent(out.shareUrl) + "&text=" + encodeURIComponent(shareText));
+      // Ссылка второй стороне — показываем экран со ссылкой (переслать/скопировать).
+      if (wantShare) {
+        if (out.shareUrl) { openShareResult(out.shareUrl); return; }
+        tg?.showAlert?.("Не удалось создать ссылку. Попробуйте ещё раз.");
         return;
       }
+      let msg = "Готово!";
+      if (toMe) msg += " Документы отправлены в чат.";
+      if (typeof out.credits === "number") msg += `\nОсталось договоров: ${out.credits}.`;
+      else if (out.sub) msg += `\nПодписка активна до ${new Date(out.sub).toLocaleDateString("ru-RU")}.`;
       tg?.showAlert?.(msg);
       tg?.close?.();
     }
-    else tg?.showAlert?.("Не удалось отправить: " + (out.error || "ошибка"));
+    else tg?.showAlert?.("Не удалось отправить: " + (out.error || "ошибка") + (out.detail ? " (" + out.detail + ")" : ""));
   } catch (e) { tg?.showAlert?.("Ошибка отправки: " + (e.message || e)); }
   finally { sb.textContent = "✅ Отправить"; sb.disabled = false; }
 }
