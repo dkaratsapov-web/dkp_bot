@@ -210,6 +210,8 @@
   </div>
 </div>
 
+<button class="btn sec" id="saveDraftBtn" style="width:100%;padding:12px;font-size:15px;margin:0 0 4px" onclick="saveDraftManual(this)">💾 Сохранить в черновик</button>
+
 <div class="legal">ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</div>
 
 <button class="submit" id="go" onclick="generate()">Сформировать документы</button>
@@ -516,6 +518,13 @@ async function saveDraft() {
     if (res && res.id) currentDraftId = res.id;
     return res;
   } catch (e) { return { error: "save_failed" }; }
+}
+// Ручное сохранение в черновик (кнопка) — без формирования документов.
+async function saveDraftManual(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Сохраняю…"; }
+  const res = await saveDraft();
+  if (btn) { btn.disabled = false; btn.textContent = "💾 Сохранить в черновик"; }
+  tg?.showAlert?.(res && res.ok ? "Черновик сохранён — откройте «📁 Мои черновики»." : "Не удалось сохранить черновик.");
 }
 function openDrafts() { document.getElementById("drafts").style.display = "flex"; renderDrafts(); }
 function closeDrafts() { document.getElementById("drafts").style.display = "none"; }
