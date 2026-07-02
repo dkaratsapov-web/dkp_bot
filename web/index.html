@@ -18,7 +18,7 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg);
-         color: var(--fg); padding: 12px 12px 96px; color-scheme: dark; }
+         color: var(--fg); padding: 12px 12px 150px; color-scheme: dark; }
   h2 { font-size: 17px; margin: 22px 0 8px; color: #fff; }
   h2:first-child { margin-top: 4px; }
   /* Шапка — бренд «Безопасный АвтоПодбор» */
@@ -83,10 +83,14 @@
   .btn { display: inline-block; padding: 9px 12px; border-radius: 9px; border: none;
           background: var(--btn); color: var(--btn-fg); font-size: 14px; cursor: pointer; }
   .btn.sec { background: transparent; color: var(--brand-l); border: 1px solid var(--brand-d); }
-  .submit { position: fixed; left: 12px; right: 12px; bottom: 12px; padding: 14px;
-          font-size: 16px; border-radius: 12px; border: none; font-weight: 600;
+  /* Закреплённая нижняя панель: «Сохранить в черновик» + «Сформировать документы» */
+  .bottombar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 40;
+          display: flex; flex-direction: column; gap: 8px; }
+  .bottombar .bb-save { width: 100%; padding: 11px; font-size: 14px;
+          background: var(--panel); border: 1px solid var(--brand-d); color: var(--brand-l); }
+  .bottombar .bb-go { padding: 14px; font-size: 16px; border-radius: 12px; border: none; font-weight: 600;
           background: linear-gradient(135deg, var(--brand), var(--brand-d)); color: var(--btn-fg);
-          box-shadow: 0 6px 18px #2b7de955; }
+          box-shadow: 0 6px 18px #2b7de955; cursor: pointer; }
   .hint { font-size: 12px; color: var(--hint); margin: 4px 0; }
   .badge { font-size: 11px; color: var(--hint); }
   .legal { font-size: 11px; color: var(--hint); text-align: center; line-height: 1.5; margin: 22px 0 4px; }
@@ -210,11 +214,12 @@
   </div>
 </div>
 
-<button class="btn sec" id="saveDraftBtn" style="width:100%;padding:12px;font-size:15px;margin:0 0 4px" onclick="saveDraftManual(this)">💾 Сохранить в черновик</button>
-
 <div class="legal">ИП Букин Матвей Игоревич · ИНН 502481713312 · ОГРНИП 325774600438571</div>
 
-<button class="submit" id="go" onclick="generate()">Сформировать документы</button>
+<div class="bottombar">
+  <button class="btn sec bb-save" id="saveDraftBtn" onclick="saveDraftManual(this)">💾 Сохранить в черновик</button>
+  <button class="bb-go" id="go" onclick="generate()">Сформировать документы</button>
+</div>
 
 <div id="paywall" style="display:flex;position:fixed;inset:0;z-index:60;background:var(--bg);flex-direction:column">
   <div style="padding:12px 14px;border-bottom:1px solid #0002;display:flex;align-items:center;gap:8px">
